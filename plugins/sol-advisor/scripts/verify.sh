@@ -270,6 +270,11 @@ for tool in list_projects list_threads create_thread wait_threads read_thread se
 done
 grep -Fq 'gpt-5.6-luna' "$skill" || fail "skill omits Luna model"
 grep -Fq 'thinking` to `max' "$skill" || fail "skill omits Luna Max routing"
+grep -Fq 'activation: "visual-required"' "$skill" || fail "skill omits visual-required activation"
+grep -Fq 'material input to implementation or acceptance' "$skill" || fail "skill omits material visual trigger"
+grep -Fq 'current request opts out' "$skill" || fail "skill omits current-request opt-out"
+grep -Fq 'Missing activation means explicit-only' "$luna_contract" || fail "Luna contract omits legacy explicit-only behavior"
+grep -Fq 'standing visual-required authorization' "$luna_contract" || fail "Luna contract omits standing authorization"
 grep -Fq 'isGitRepository' "$luna_contract" || fail "Luna contract omits Git-project check"
 grep -Fq 'isolated worktree environment' "$luna_contract" || fail "Luna contract omits Git worktree default"
 grep -Fq 'clientThreadId' "$luna_contract" || fail "Luna contract omits setup-pending identity guard"

@@ -1,6 +1,6 @@
 ---
 name: setup
-description: "Run Sol Advisor's first-use or reconfiguration interview in the parent chat, validate exact client-native model choices, persist logical preferences, preview native adapter files, and install only after explicit confirmation."
+description: "Use when Sol Advisor setup is missing, outdated, corrupt, or being reconfigured for exact client-native models, role efforts, scope, adapter installation, or Luna activation."
 ---
 
 # Sol Advisor setup
@@ -26,7 +26,10 @@ Ask one focused question at a time:
    is not OS enforcement unless the client exposes sandbox evidence.
 7. Confirm fail-closed behavior: no fallback roles or models.
 8. Preserve the optional Codex app-task lane separately. Enable Luna / Max only after
-   explicit opt-in; it is never a fallback or a routine native role.
+   explicit opt-in; it is never a fallback or a routine native role. Ask whether its
+   activation is `explicit` or `visual-required`. `visual-required` is standing
+   authorization to create a user-visible Luna task only when an image, screenshot,
+   or rendered interface is a material input to implementation or acceptance.
 
 Offer these current Codex recommendations as editable defaults, not universal IDs:
 
@@ -34,6 +37,20 @@ Offer these current Codex recommendations as editable defaults, not universal ID
 - high: `gpt-5.6-terra`, effort `high`
 - advisor: `gpt-5.6-sol`, effort `high`, requested read-only
 - orchestrator: always `inherit`; recommend selecting Sol / High in the main chat
+
+When `visual-required` is selected, the complete logical preference object must show:
+
+~~~json
+"appTaskLane": {
+  "enabled": true,
+  "model": "gpt-5.6-luna",
+  "effort": "max",
+  "activation": "visual-required"
+}
+~~~
+
+Missing activation remains explicit-only. A current request that opts out of Luna or
+task creation takes precedence over standing authorization.
 
 Call `save_preferences` only after showing the complete logical preference object.
 Use no secrets. For an unsupported execution surface (ChatGPT Work web, Kiro web/mobile, or a

@@ -1,6 +1,6 @@
 ---
 name: orchestration
-description: "Configurable cross-client architect workflow that inherits the parent model, loads saved exact native role preferences, routes routine versus high-complexity implementation, preserves the separate opt-in Luna app-task lane, and keeps parent verification and acceptance."
+description: "Use when Sol Advisor has a ready profile and must route implementation, review, or an authorized visual-required Codex Luna app task."
 ---
 
 # Sol Advisor Orchestration
@@ -27,21 +27,21 @@ actual sandbox guarantee must be reported from client evidence, not inferred.
 
 On ChatGPT Work web, Kiro web/mobile, and skills-only surfaces without enforceable
 native role bindings, use the stored preferences as prompt guidance only and state
-that models, effort, and read-only isolation are not enforceable. The explicit Codex
-Luna / Max app-task lane remains separate and opt-in; never use it as fallback.
+that models, effort, and read-only isolation are not enforceable. The separately
+authorized Codex Luna / Max app-task lane remains opt-in; never use it as fallback.
 
 Act as the architect. Own the user's intent, architecture, decomposition, complete
 task specification, parent verification, and final acceptance. The default native
 lane delegates implementation to Terra / High and requires a fresh Sol verdict. The
-explicit Luna task lane creates user-visible Codex app tasks at GPT-5.6 Luna / Max;
+authorized Luna task lane creates user-visible Codex app tasks at GPT-5.6 Luna / Max;
 the primary task monitors, reviews, corrects, authorizes PR creation, and orders
 dependent stacks. These lanes are distinct: the Luna lane is outside native subagent
-V2, never uses a Luna custom-agent TOML, and is never activated implicitly.
+V2 and never uses a Luna custom-agent TOML.
 
 Read [references/role-contracts.md](references/role-contracts.md) before the first
 native delegation in a session. Read the [Luna task-lane contract](references/luna-task-lane.md)
-before any explicitly authorized Luna task creation. Hosts other than Codex must first
-apply the [portable entry contract](references/portable-entry.md).
+before any authorized Luna task creation. Hosts other than Codex must first apply the
+[portable entry contract](references/portable-entry.md).
 
 ## Portable entry contract
 
@@ -76,9 +76,20 @@ The retained exact Codex compatibility lane may still use its separately install
 `sol_advisor_terra_implementer` and `sol_advisor_sol_reviewer` profiles and the legacy
 preflight below. Do not require those companions for configured cross-client roles.
 
-Activate the Luna task lane only when the user's current request explicitly says
-“Use the Luna task lane.” It uses Codex app task tools rather than a native agent file.
-If Luna / Max or a required app tool is unavailable, stop without fallback.
+The Luna lane remains separately and explicitly authorized. A saved
+`activation: "visual-required"` is standing authorization for a user-visible app task
+only when an image, screenshot, or rendered interface is a material input to
+implementation or acceptance. Missing activation means explicit-only. Never use it
+as fallback.
+
+Do not activate for text-only work, ordinary frontend work without material visual
+input, incidental attachments, image explanation without implementation, raw audio
+or raw video without an accepted frame workflow, or when the current request opts out.
+Ambiguity defaults to no automatic task creation. An explicit request to use the Luna
+task lane remains valid when its required capabilities are available.
+
+The Luna lane uses Codex app task tools rather than a native agent file. If Luna / Max
+or a required app tool is unavailable, stop without fallback.
 
 ## Retained Codex compatibility preflight
 
@@ -162,7 +173,8 @@ patch or create a replacement task merely to avoid an unresolved correction.
 This section applies only to the explicitly retained exact Codex compatibility lane, not configured adapters. Use the same role for routine features, mechanical edits, difficult debugging,
 security-sensitive work, non-trivial algorithms, and broad refactors. There is no
 second native implementation or fallback lane. This section applies only when the
-user has not explicitly chosen the Luna task lane.
+Luna lane was not selected by an explicit request or the saved visual-required
+activation rules.
 
 Spawn exactly:
 
@@ -185,13 +197,14 @@ Routing rules:
 - Give a failed lane a corrected specification; never repeat an unchanged prompt.
 - Never silently substitute a role, model, or reasoning level.
 
-## Route the explicit Luna task lane through Codex app tools
+## Route the authorized Luna task lane through Codex app tools
 
-The Luna lane is opt-in only and is not a native `spawn_agent` lane. The primary task
-must use `list_projects` before `create_thread`, select the project using its returned
-`projectId`, and inspect `isGitRepository`. For a Git project, create the child with
-the app's default isolated worktree; for a non-Git project, use the project's local
-environment. Do not assume an isolated worktree makes concurrent edits merge-safe.
+The Luna lane is separately authorized and is not a native `spawn_agent` lane. The
+primary task must use `list_projects` before `create_thread`, select the project using
+its returned `projectId`, and inspect `isGitRepository`. For a Git project, create the
+child with the app's default isolated worktree; for a non-Git project, use the
+project's local environment. Do not assume an isolated worktree makes concurrent
+edits merge-safe.
 
 The child receives a complete packet because a new user-visible task does not inherit
 the parent's full context. Set `model` to `gpt-5.6-luna` and `thinking` to `max` in
