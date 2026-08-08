@@ -25,8 +25,11 @@ Ask one focused question at a time:
 6. Confirm the advisor is requested as read-only. Explain that behavioral read-only
    is not OS enforcement unless the client exposes sandbox evidence.
 7. Confirm fail-closed behavior: no fallback roles or models.
-8. Preserve the optional Codex app-task lane separately. Enable Luna / Max only after
-   explicit opt-in; it is never a fallback or a routine native role.
+8. Preserve the optional Codex app-task lane separately. Enable Luna / Max app tasks
+   only after explicit opt-in. The native routine role may use any exact
+   user-selected client-native model, including Luna.
+   Choosing Luna for routine does not enable or select the app-task lane. Neither
+   route is a fallback for the other.
 
 Offer these current Codex recommendations as editable defaults, not universal IDs:
 

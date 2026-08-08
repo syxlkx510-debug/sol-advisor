@@ -50,8 +50,9 @@ and three exact client-native model IDs copied from the client's picker or `/mod
 
 These are editable recommendations, not a universal model catalog. Sol Advisor never
 guesses, normalizes, silently falls back, or claims a model exists in another client.
-The optional Codex app-task lane remains a distinct explicit opt-in for
-`gpt-5.6-luna` / Max; it is never a fallback or a native role.
+A native routine role may use Luna when the user copies and saves that exact native
+model ID. This does not authorize the Luna app-task lane, which remains a distinct
+current-request opt-in for a separate user-visible `gpt-5.6-luna` / Max task.
 
 ## Go deeper
 
@@ -238,10 +239,11 @@ parent verifies the working tree and checks. The advisor remains behaviorally
 read-only unless the client exposes evidence of OS-enforced isolation; Sol Advisor
 reports the observed guarantee rather than inventing one.
 
-The historical exact Codex native lane remains compatible: separately installed
-Terra / High implementation and a fresh Sol / High reviewer. It does not use a Luna
-custom-agent TOML. The Luna lane instead uses app task tools and is outside native
-subagent V2.
+The historical exact Codex compatibility lane remains available as separately
+installed Terra / High implementation and Sol / High review profiles. It does not
+use a Luna companion TOML. Configured cross-client native roles are independent and
+may use any exact saved model, including Luna. The Luna app-task lane instead uses
+app task tools and remains outside native subagent V2.
 
 | Mode | Worker | Parent ownership |
 |---|---|---|

@@ -30,6 +30,19 @@ describe("explicit Luna task contract",()=>{
   expect(JSON.stringify({codex,standard})).not.toContain("visual-required");
  });
 
+ test("allows an explicitly selected Luna native routine without selecting the app-task lane",()=>{
+  const setup=read("skills","setup","SKILL.md");
+  const skill=read("skills","orchestration","SKILL.md");
+  const readme=readFileSync(join(import.meta.dir,"..","README.md"),"utf8");
+  expect(setup).toContain("including Luna");
+  expect(setup).toContain("does not enable or select the app-task lane");
+  expect(setup).not.toContain("never a fallback or a routine native role");
+  expect(skill).toContain("may be backed by Luna");
+  expect(skill).toContain("Model family does not select the execution lane");
+  expect(readme).toContain("A native routine role may use Luna");
+  expect(readme).toContain("does not authorize the Luna app-task lane");
+ });
+
  test("shell verifier compares the three metadata versions instead of a release literal",()=>{
   const verifier=read("scripts","verify.sh");
   expect(verifier).toContain("standard_manifest=$plugin_dir/plugin.json");

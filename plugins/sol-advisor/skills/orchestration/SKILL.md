@@ -32,11 +32,13 @@ Luna / Max app-task lane remains separate and opt-in; never use it as fallback.
 
 Act as the architect. Own the user's intent, architecture, decomposition, complete
 task specification, parent verification, and final acceptance. The default native
-lane delegates implementation to Terra / High and requires a fresh Sol verdict. The
-explicit Luna task lane creates user-visible Codex app tasks at GPT-5.6 Luna / Max;
-the primary task monitors, reviews, corrects, authorizes PR creation, and orders
-dependent stacks. These lanes are distinct: the Luna lane is outside native subagent
-V2, never uses a Luna custom-agent TOML, and is never activated implicitly.
+lane delegates implementation to the configured routine or high-complexity role and
+requires the configured advisor verdict. A native routine role may be backed by Luna
+when that exact model was explicitly saved. The explicit Luna task lane instead
+creates a separate user-visible Codex app task at GPT-5.6 Luna / Max; the primary task
+monitors, reviews, corrects, authorizes PR creation, and orders dependent stacks.
+Model family does not select the execution lane. The app-task lane is outside native
+subagent V2, never uses any custom-agent TOML, and is never activated implicitly.
 
 Read [references/role-contracts.md](references/role-contracts.md) before the first
 native delegation in a session. Read the [Luna task-lane contract](references/luna-task-lane.md)
@@ -71,6 +73,11 @@ GitHub Copilot, and Kiro use `sol-advisor-routine`, `sol-advisor-high`, and
 `sol-advisor-advisor`. Never prescribe Codex identifiers cross-client. Role files,
 not per-spawn guesses, carry client-native model settings. Report routing or sandbox
 evidence only when exposed by the host.
+
+The saved routine model may be Luna. Invoke `sol_advisor_routine` for native routine
+work regardless of model family; do not reinterpret that saved model as app-task
+authorization. Select the Luna app-task lane only from the current request's explicit
+execution-route authorization.
 
 The retained exact Codex compatibility lane may still use its separately installed
 `sol_advisor_terra_implementer` and `sol_advisor_sol_reviewer` profiles and the legacy
