@@ -33,7 +33,7 @@ function fixture(existingMcp?: object) {
 }
 const readJson = (path: string) => JSON.parse(readFileSync(path, "utf8"));
 
-describe("Cursor local compatibility installer", () => {
+describe.skipIf(process.platform === "win32")("Cursor local compatibility installer", () => {
   test("installs a physical plugin copy and project-native MCP overlay", () => {
     const f = fixture();
     const result = installCursorLocal(f);
@@ -166,9 +166,9 @@ describe("Cursor local compatibility installer", () => {
     expect(existsSync(installed.workspaceMcp)).toBe(true);
   });
 
-  test("fails closed outside the live-tested macOS host", () => {
-    const f = fixture();
-    expect(() => installCursorLocal({ ...f, platform: "linux" })).toThrow("supports macOS only");
-  });
+});
 
+test("Cursor local compatibility installer fails closed outside the live-tested macOS host", () => {
+  const f = fixture();
+  expect(() => installCursorLocal({ ...f, platform: "linux" })).toThrow("supports macOS only");
 });

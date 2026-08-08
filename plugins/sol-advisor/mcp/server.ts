@@ -2,7 +2,8 @@
 import { createHash, randomUUID } from "node:crypto";
 import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync, copyFileSync, chmodSync, linkSync, statSync, openSync, fsyncSync, closeSync } from "node:fs";
 import { homedir } from "node:os";
-import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { basename, dirname, isAbsolute, join, parse, relative, resolve, sep } from "node:path";
+import { assertPrivateDirectory } from "./private-directory";
 
 export const CONFIG_SCHEMA_VERSION = 1;
 export const MANAGED_MARKER = "sol-advisor-managed:v1";
@@ -31,21 +32,22 @@ export function __resetDataPinForTests(){pinnedDataDir=undefined;}
 function dataDir(): string {
   const raw=process.env.PLUGIN_DATA;
   if (!raw || !isAbsolute(raw)) throw new Error("PLUGIN_DATA must be an explicit absolute existing directory");
-  const lexical=resolve(raw), forbidden=new Set([resolve(sep),realpathSync(homedir()),pluginRoot]);
-  if(forbidden.has(lexical)) throw new Error("PLUGIN_DATA cannot be filesystem root, home, or plugin root");
-  let cursor=resolve(sep); for(const part of relative(resolve(sep),lexical).split(sep).filter(Boolean)){cursor=join(cursor,part);if(existsSync(cursor)&&lstatSync(cursor).isSymbolicLink())throw new Error(`PLUGIN_DATA has symlink ancestor: ${cursor}`);}
+  const lexical=resolve(raw), lexicalRoot=parse(lexical).root, forbidden=new Set([realpathSync(homedir()),pluginRoot]);
+  if(lexical===lexicalRoot||forbidden.has(lexical)) throw new Error("PLUGIN_DATA cannot be filesystem root, home, or plugin root");
+  let cursor=lexicalRoot; for(const part of relative(lexicalRoot,lexical).split(sep).filter(Boolean)){cursor=join(cursor,part);if(existsSync(cursor)&&lstatSync(cursor).isSymbolicLink())throw new Error(`PLUGIN_DATA has symlink ancestor: ${cursor}`);}
   if (!existsSync(lexical) || !lstatSync(lexical).isDirectory() || lstatSync(lexical).isSymbolicLink()) throw new Error("PLUGIN_DATA must be an existing non-symlink directory");
   const actual=realpathSync(lexical), st=statSync(actual), pinned=pinnedDataDir;
-  if((st.mode&0o077)!==0)throw new Error("PLUGIN_DATA must be private (no group/world permission bits)");
+  if(!pinned||process.platform!=="win32")assertPrivateDirectory(actual);
   if(pinned&&(pinned.lexical!==lexical||pinned.real!==actual||pinned.dev!==st.dev||pinned.ino!==st.ino))throw new Error("PLUGIN_DATA identity changed during this server process");
   if(!pinned)pinnedDataDir={lexical,real:actual,dev:st.dev,ino:st.ino}; return actual;
 }
 function configPath() { return join(dataDir(), "config.json"); }
 function manifestPath() { return join(dataDir(), "managed-files.json"); }
-function backupDir(){const root=dataDir(),path=join(root,"backups");if(!existsSync(path))mkdirSync(path,{mode:0o700});const info=lstatSync(path);if(info.isSymbolicLink()||!info.isDirectory())throw new Error("PLUGIN_DATA backups must be a real directory");const actual=realpathSync(path),rel=relative(root,actual);if(rel!=="backups"||isAbsolute(rel)||rel.startsWith(".."))throw new Error("PLUGIN_DATA backups escapes the pinned data root");if((statSync(actual).mode&0o077)!==0)throw new Error("PLUGIN_DATA backups must be private");return actual;}
+function backupDir(){const root=dataDir(),path=join(root,"backups");if(!existsSync(path))mkdirSync(path,{mode:0o700});const info=lstatSync(path);if(info.isSymbolicLink()||!info.isDirectory())throw new Error("PLUGIN_DATA backups must be a real directory");const actual=realpathSync(path),rel=relative(root,actual);if(rel!=="backups"||isAbsolute(rel)||rel.startsWith(".."))throw new Error("PLUGIN_DATA backups escapes the pinned data root");assertPrivateDirectory(actual);return actual;}
 function sha(text: string | Uint8Array) { return createHash("sha256").update(text).digest("hex"); }
-function syncFile(path:string){const fd=openSync(path,"r");try{fsyncSync(fd);}finally{closeSync(fd);}}
-function syncDir(path:string){const fd=openSync(path,"r");try{fsyncSync(fd);}finally{closeSync(fd);}}
+function syncFd(fd:number){try{fsyncSync(fd);}catch(error){if(process.platform==="win32"&&(error as NodeJS.ErrnoException).code==="EPERM")return;throw error;}}
+function syncFile(path:string){const fd=openSync(path,"r");try{syncFd(fd);}finally{closeSync(fd);}}
+function syncDir(path:string){const fd=openSync(path,"r");try{syncFd(fd);}finally{closeSync(fd);}}
 function atomicWrite(path: string, text: string) {
   mkdirSync(dirname(path), { recursive: true });
   const temp = join(dirname(path), `.${basename(path)}.${process.pid}.${randomUUID()}.tmp`);
@@ -237,6 +239,7 @@ function rejectUnknown(value:any, allowed:string[], label:string){ for(const key
 function savePreferences(args:any) {
   assertSafeInput(args); rejectUnknown(args,["client","scope","workspace","orchestrator","roles","appTaskLane"],"preference"); rejectUnknown(args.orchestrator,["model","recommendation"],"orchestrator");
   for(const name of ["routine","high","advisor"] as RoleName[]) rejectUnknown(args.roles?.[name],["model","effort","readonly"],`role ${name}`);
+  rejectUnknown(args.appTaskLane,["enabled"],"appTaskLane");
   const now=new Date().toISOString(), existing=configState(), workspace=safeWorkspace(args.workspace);
   const profileKey=`${args.client}:${args.scope}:${workspace}`;
   const candidate:any={schemaVersion:1,client:args.client,scope:args.scope,orchestrator:{model:"inherit",...(args.orchestrator?.recommendation?{recommendation:{model:args.orchestrator.recommendation.model,...(args.orchestrator.recommendation.effort!==undefined?{effort:args.orchestrator.recommendation.effort}:{})}}:{})},roles:{routine:{model:args.roles?.routine?.model,...(args.roles?.routine?.effort!==undefined?{effort:args.roles.routine.effort}:{}),...(args.roles?.routine?.readonly!==undefined?{readonly:args.roles.routine.readonly}:{})},high:{model:args.roles?.high?.model,...(args.roles?.high?.effort!==undefined?{effort:args.roles.high.effort}:{}),...(args.roles?.high?.readonly!==undefined?{readonly:args.roles.high.readonly}:{})},advisor:{model:args.roles?.advisor?.model,...(args.roles?.advisor?.effort!==undefined?{effort:args.roles.advisor.effort}:{}),readonly:true}},fallbackPolicy:"fail-closed",fallbacks:[],...(args.appTaskLane?.enabled===true?{appTaskLane:{enabled:true,model:"gpt-5.6-luna",effort:"max"}}:{}),profileKey,workspace,createdAt:existing.preferences?.profileKey===profileKey?existing.preferences.createdAt:now,updatedAt:now,pluginVersion:"0.5.0"};

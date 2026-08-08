@@ -1,6 +1,6 @@
 {
   "name": "sol-advisor",
-  "version": "0.5.0",
+  "version": "0.5.0+codex.20260808142742",
   "description": "Configurable architect workflow that inherits the parent model, supports exact native roles, preserves explicit opt-in GPT-5.6 Luna app tasks through Codex app task tools, and retains fresh Sol review compatibility.",
   "author": {
     "name": "Daniel McAteer",
@@ -16,6 +16,7 @@
     "gpt-5.6"
   ],
   "skills": "./skills/",
+  "mcpServers": "./.mcp.json",
   "interface": {
     "displayName": "Sol Advisor",
     "shortDescription": "Inherit the parent model, configure exact native roles, or explicitly opt into Luna tasks.",

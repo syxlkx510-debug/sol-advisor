@@ -15,6 +15,32 @@ const authorAllowed = new Set(["name", "email", "url"]);
 const errors: string[] = [];
 const fail = (message: string) => errors.push(message);
 const json = (path: string): any => JSON.parse(readFileSync(path, "utf8"));
+const canonicalText = (path: string): string => readFileSync(path, "utf8").replace(/\r\n/g, "\n");
+
+function makePrivateDirectory(path: string): void {
+  if (process.platform !== "win32") { chmodSync(path, 0o700); return; }
+  const script = `
+    $path = $env:SOL_ADVISOR_PRIVATE_PATH
+    $user = [System.Security.Principal.WindowsIdentity]::GetCurrent().User
+    $acl = [System.Security.AccessControl.DirectorySecurity]::new()
+    $acl.SetAccessRuleProtection($true, $false)
+    $acl.SetOwner($user)
+    foreach ($sid in @($user.Value, 'S-1-5-18', 'S-1-5-32-544')) {
+      $identity = [System.Security.Principal.SecurityIdentifier]::new($sid)
+      $rule = [System.Security.AccessControl.FileSystemAccessRule]::new(
+        $identity, 'FullControl', 'ContainerInherit,ObjectInherit', 'None', 'Allow')
+      $acl.AddAccessRule($rule)
+    }
+    Set-Acl -LiteralPath $path -AclObject $acl
+  `;
+  const result = Bun.spawnSync([
+    "powershell.exe", "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", script,
+  ], { env: { ...process.env, SOL_ADVISOR_PRIVATE_PATH: path } });
+  if (result.exitCode !== 0) {
+    const detail = result.stderr.toString().trim() || result.stdout.toString().trim();
+    throw new Error(`failed to create private Windows test directory${detail ? `: ${detail}` : ""}`);
+  }
+}
 
 function validateManifest(value: any, label: string): boolean {
   const before = errors.length;
@@ -96,7 +122,7 @@ function validateSkills(skillsRoot: string) {
   const skillFiles = discoverSkills(skillsRoot);
   if (!skillFiles.length) fail(`${skillsRoot}: no immediate-child skills found`);
   for (const path of skillFiles) {
-    const text = readFileSync(path, "utf8");
+    const text = canonicalText(path);
     const frontmatter = text.match(/^---\n([\s\S]*?)\n---\n/);
     if (!frontmatter) { fail(`${path}: missing YAML frontmatter`); continue; }
     const name = frontmatter[1]!.match(/^name:\s*["']?([^"'\n]+)["']?\s*$/m)?.[1]?.trim();
@@ -146,8 +172,7 @@ function validateFixtures() {
 
 function validateMcp(path: string) {
   let value:any; try { value=json(path); } catch { fail(`${path}: invalid JSON`); return; }
-  const expectedSchema="https://agent-plugins.org/schemas/1.0.0/mcp.schema.json";
-  if (!value || typeof value!=="object" || Array.isArray(value) || Object.keys(value).some(k=>!["$schema","mcpServers"].includes(k)) || value.$schema!==expectedSchema) { fail(`${path}: MCP root must contain exact $schema and mcpServers`); return; }
+  if (!value || typeof value!=="object" || Array.isArray(value) || Object.keys(value).some(k=>k!=="mcpServers")) { fail(`${path}: MCP root must contain only mcpServers`); return; }
   const servers=value.mcpServers; if(!servers||typeof servers!=="object"||Array.isArray(servers)||!Object.keys(servers).length) fail(`${path}: mcpServers must be non-empty`);
   for(const [name,server] of Object.entries(servers??{}) as [string,any][]) {
     if(!pluginNamePattern.test(name)) fail(`${path}: invalid MCP server name ${name}`);
@@ -165,18 +190,21 @@ function validatePackage(packageRoot: string, readme?: string) {
   if (standard.version !== codex.version) fail("standard/Codex manifest version mismatch");
   validateSkills(join(packageRoot, "skills"));
   validateLinks([...(readme ? [readme] : []), ...files.filter((file) => file.endsWith(".md"))], packageRoot);
-  if (!existsSync(join(packageRoot, "mcp.json"))) fail("mcp.json is required"); else validateMcp(join(packageRoot, "mcp.json"));
+  if (codex.mcpServers !== "./.mcp.json") fail("Codex manifest mcpServers must be ./.mcp.json");
+  const mcpPath = join(packageRoot, ".mcp.json");
+  if (!existsSync(mcpPath)) fail(".mcp.json is required"); else validateMcp(mcpPath);
+  if (existsSync(join(packageRoot, "mcp.json"))) fail("legacy mcp.json must not be shipped");
   if (!existsSync(join(packageRoot,"mcp","server.ts"))) fail("MCP runtime server is required");
 }
 
 function validateRepository() {
   const schemaPath = join(root, "tools", "schema", "agent-plugin-v1.schema.json");
-  const digest = createHash("sha256").update(readFileSync(schemaPath)).digest("hex");
+  const digest = createHash("sha256").update(canonicalText(schemaPath)).digest("hex");
   if (digest !== schemaSha256) fail(`vendored schema digest mismatch: ${digest}`);
   const pin = readFileSync(join(root, "tools", "schema", "agent-plugin-v1.schema.sha256"), "utf8").trim();
   if (pin !== `${schemaSha256}  agent-plugin-v1.schema.json`) fail("schema checksum file mismatch");
   const mcpSchemaPath=join(root,"tools","schema","agent-plugin-v1-mcp.schema.json");
-  const mcpDigest=createHash("sha256").update(readFileSync(mcpSchemaPath)).digest("hex");
+  const mcpDigest=createHash("sha256").update(canonicalText(mcpSchemaPath)).digest("hex");
   if(mcpDigest!==mcpSchemaSha256) fail(`vendored MCP schema digest mismatch: ${mcpDigest}`);
   const mcpPin=readFileSync(join(root,"tools","schema","agent-plugin-v1-mcp.schema.sha256"),"utf8").trim();
   if(mcpPin!==`${mcpSchemaSha256}  agent-plugin-v1-mcp.schema.json`) fail("MCP schema checksum file mismatch");
@@ -188,7 +216,7 @@ async function run(command: string, args: string[], cwd = root): Promise<string>
   const proc = Bun.spawn([command, ...args], { cwd, stdout: "pipe", stderr: "pipe" });
   const [stdout, stderr, code] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text(), proc.exited]);
   if (code !== 0) throw new Error(`${command} failed (${code}): ${stderr.trim()}`);
-  return stdout;
+  return stdout.replace(/\r\n/g, "\n");
 }
 
 async function release(checkOnly: boolean) {
@@ -217,7 +245,7 @@ async function release(checkOnly: boolean) {
       extracted = mkdtempSync(join(tmpdir(), "sol-advisor-release-check-"));
       await run("tar", ["-xzf", artifact, "-C", extracted]);
       validatePackage(extracted);
-      let runtimeData=join(extracted,"runtime-data"), runtimeHome=join(extracted,"runtime-home"); mkdirSync(runtimeData,{recursive:true}); chmodSync(runtimeData,0o700); mkdirSync(runtimeHome,{recursive:true}); runtimeData=realpathSync(runtimeData); runtimeHome=realpathSync(runtimeHome);
+      let runtimeData=join(extracted,"runtime-data"), runtimeHome=join(extracted,"runtime-home"); mkdirSync(runtimeData,{recursive:true}); makePrivateDirectory(runtimeData); mkdirSync(runtimeHome,{recursive:true}); runtimeData=realpathSync(runtimeData); runtimeHome=realpathSync(runtimeHome);
       const runtimeWork=join(extracted,"runtime-work"); mkdirSync(runtimeWork,{recursive:true});
       const server=Bun.spawn(["bun",join(extracted,"mcp","server.ts")],{env:{...process.env,PLUGIN_DATA:runtimeData,HOME:runtimeHome},stdin:"pipe",stdout:"pipe",stderr:"pipe"});
       const reader=server.stdout.getReader(), decoder=new TextDecoder(); let rpcBuffer="", rpcId=0;

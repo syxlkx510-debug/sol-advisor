@@ -1,13 +1,15 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync, existsSync, realpathSync, chmodSync, statSync, renameSync, readdirSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, rmdirSync, symlinkSync, writeFileSync, existsSync, realpathSync, chmodSync, statSync, renameSync, readdirSync } from "node:fs";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { __resetDataPinForTests, __setManifestWriteFaultForTests, callTool, handle, renderAdapter } from "./server";
+import { __setWindowsAclReaderForTests } from "./private-directory";
 
 let root="", data="", workspace="";
 const base=(client="codex",scope="project")=>({client,scope,workspace,orchestrator:{model:"inherit",recommendation:{model:"gpt-5.6-sol",effort:"high"}},roles:{routine:{model:"gpt-5.6-terra",...(client==="codex"||client==="cursor"?{effort:"high"}:{})},high:{model:"gpt-5.6-terra",...(client==="codex"||client==="cursor"?{effort:"high"}:{})},advisor:{model:"gpt-5.6-sol",...(client==="codex"||client==="cursor"?{effort:"high"}:{}),readonly:true}}});
-beforeEach(()=>{__resetDataPinForTests();root=realpathSync(mkdtempSync(join(tmpdir(),"sol-advisor-test-")));data=join(root,"data");workspace=join(root,"work");mkdirSync(data);chmodSync(data,0o700);mkdirSync(workspace);process.env.PLUGIN_DATA=data;});
-afterEach(()=>{__setManifestWriteFaultForTests(undefined);__resetDataPinForTests();delete process.env.PLUGIN_DATA;rmSync(root,{recursive:true,force:true});});
+const privateWindowsAcl=()=>({owner:"S-1-5-21-test",currentUser:"S-1-5-21-test",rules:[{identity:"S-1-5-21-test",access:"Allow" as const,rights:2032127}]});
+beforeEach(()=>{__resetDataPinForTests();__setWindowsAclReaderForTests(privateWindowsAcl);root=realpathSync(mkdtempSync(join(tmpdir(),"sol-advisor-test-")));data=join(root,"data");workspace=join(root,"work");mkdirSync(data);if(process.platform!=="win32")chmodSync(data,0o700);mkdirSync(workspace);process.env.PLUGIN_DATA=data;});
+afterEach(()=>{__setManifestWriteFaultForTests(undefined);__setWindowsAclReaderForTests();__resetDataPinForTests();delete process.env.PLUGIN_DATA;rmSync(root,{recursive:true,force:true});});
 
 describe("MCP protocol",()=>{
  test("initialize ping and tools",async()=>{
@@ -22,7 +24,7 @@ describe("MCP protocol",()=>{
   const toolFailure:any=await handle({jsonrpc:"2.0",id:7,method:"tools/call",params:{name:"get_preferences",arguments:{}}});expect(toolFailure.error).toBeUndefined();expect(toolFailure.result.isError).toBe(true);
  });
  test("actual stdio server accepts newline-delimited JSON",async()=>{
-  const proc=Bun.spawn(["bun",join(import.meta.dir,"server.ts")],{env:{...process.env,PLUGIN_DATA:data},stdin:"pipe",stdout:"pipe",stderr:"pipe"});
+  const proc=Bun.spawn([process.execPath,join(import.meta.dir,"server.ts")],{env:{...process.env,PLUGIN_DATA:data},stdin:"pipe",stdout:"pipe",stderr:"pipe"});
   proc.stdin.write(JSON.stringify({jsonrpc:"2.0",id:1,method:"ping"})+"\n"); proc.stdin.end();
   const out=await new Response(proc.stdout).text(); expect(await proc.exited).toBe(0); expect(JSON.parse(out).result).toEqual({});
  });
@@ -30,12 +32,15 @@ describe("MCP protocol",()=>{
 
 describe("PLUGIN_DATA boundary",()=>{
  test("rejects root home plugin root and symlink ancestors without chmod",async()=>{
-  chmodSync(data,0o755);await expect(callTool("get_setup_status")).rejects.toThrow("must be private");expect(statSync(data).mode&0o777).toBe(0o755);chmodSync(data,0o700);await callTool("get_setup_status");
-  for(const bad of ["/",realpathSync(process.env.HOME!),realpathSync(join(import.meta.dir,".."))]){process.env.PLUGIN_DATA=bad;await expect(callTool("get_setup_status")).rejects.toThrow("cannot be");}
-  const actual=join(root,"actual");mkdirSync(join(actual,"data"),{recursive:true});symlinkSync(actual,join(root,"linked"));process.env.PLUGIN_DATA=join(root,"linked","data");await expect(callTool("get_setup_status")).rejects.toThrow("symlink ancestor");process.env.PLUGIN_DATA=data;
+  if(process.platform==="win32"){
+   __setWindowsAclReaderForTests(()=>({owner:"S-1-5-21-test",currentUser:"S-1-5-21-test",rules:[{identity:"S-1-1-0",access:"Allow",rights:1}]}));
+   await expect(callTool("get_setup_status")).rejects.toThrow("must be private");__setWindowsAclReaderForTests(privateWindowsAcl);await callTool("get_setup_status");
+  }else{chmodSync(data,0o755);await expect(callTool("get_setup_status")).rejects.toThrow("must be private");expect(statSync(data).mode&0o777).toBe(0o755);chmodSync(data,0o700);await callTool("get_setup_status");}
+  for(const bad of [realpathSync(process.platform==="win32"?process.env.SystemDrive+"\\":"/"),realpathSync(homedir()),realpathSync(join(import.meta.dir,".."))]){process.env.PLUGIN_DATA=bad;await expect(callTool("get_setup_status")).rejects.toThrow("cannot be");}
+  const actual=join(root,"actual");mkdirSync(join(actual,"data"),{recursive:true});symlinkSync(actual,join(root,"linked"),process.platform==="win32"?"junction":undefined);process.env.PLUGIN_DATA=join(root,"linked","data");await expect(callTool("get_setup_status")).rejects.toThrow("symlink ancestor");process.env.PLUGIN_DATA=data;
  });
  test("pins PLUGIN_DATA device and inode for process lifetime",async()=>{
-  await callTool("get_setup_status");renameSync(data,join(root,"old-data"));mkdirSync(data);chmodSync(data,0o700);await expect(callTool("get_setup_status")).rejects.toThrow("identity changed");
+  await callTool("get_setup_status");renameSync(data,join(root,"old-data"));mkdirSync(data);if(process.platform!=="win32")chmodSync(data,0o700);await expect(callTool("get_setup_status")).rejects.toThrow("identity changed");
  });
 });
 
@@ -57,6 +62,13 @@ describe("configuration",()=>{
   const blank:any=base();blank.roles.high.model="";await expect(callTool("save_preferences",blank)).rejects.toThrow("exact");
   await expect(callTool("get_setup_status",{extra:true})).rejects.toThrow("unknown");
  });
+ test("keeps the explicit Luna task lane and rejects activation routing",async()=>{
+  const saved:any=await callTool("save_preferences",{...base(),appTaskLane:{enabled:true}});
+  expect(saved.preferences.appTaskLane).toEqual({enabled:true,model:"gpt-5.6-luna",effort:"max"});
+  expect((await callTool("get_preferences") as any).appTaskLane).toEqual({enabled:true,model:"gpt-5.6-luna",effort:"max"});
+  expect((await callTool("get_setup_status") as any).status).toBe("ready");
+  await expect(callTool("save_preferences",{...base(),appTaskLane:{enabled:true,activation:"visual-required"}})).rejects.toThrow("unknown appTaskLane field: activation");
+ });
  test("persists profiles by client scope and workspace",async()=>{
   await callTool("save_preferences",base("codex","project"));
   const other=join(root,"other");mkdirSync(other);await callTool("save_preferences",{...base("cursor","project"),workspace:other});
@@ -77,14 +89,14 @@ describe("configuration",()=>{
  });
 
  test("preexisting backups symlink is rejected without external writes",async()=>{
-  await callTool("save_preferences",base());const external=join(root,"external-backups");mkdirSync(external);symlinkSync(external,join(data,"backups"));await expect(callTool("save_preferences",base())).rejects.toThrow("backups must be a real directory");expect(existsSync(join(external,"config.json.bak"))).toBe(false);expect(readdirSync(external)).toHaveLength(0);
+  await callTool("save_preferences",base());const external=join(root,"external-backups");mkdirSync(external);symlinkSync(external,join(data,"backups"),process.platform==="win32"?"junction":undefined);await expect(callTool("save_preferences",base())).rejects.toThrow("backups must be a real directory");expect(existsSync(join(external,"config.json.bak"))).toBe(false);expect(readdirSync(external)).toHaveLength(0);
  });
 
 });
 
 describe("adapter rendering and lifecycle",()=>{
  test("renders every client and scope with deterministic exact paths",()=>{
-  for(const client of ["codex","cursor","vscode","github-copilot","kiro"]){for(const scope of ["project","user"]){const p:any=base(client,scope);p.workspace=realpathSync(workspace);p.schemaVersion=1;p.profileKey=`${client}:${scope}:${workspace}`;p.fallbackPolicy="fail-closed";p.fallbacks=[];p.createdAt=p.updatedAt="x";p.pluginVersion="0.5.0";const a=renderAdapter(p,workspace);expect(a.files).toHaveLength(3);expect(a.files.every(f=>f.content.includes("sol-advisor-managed:v1"))).toBe(true);if(client==="cursor")expect(a.warnings.join(" ")).toContain("may fall back");expect(renderAdapter(p,workspace).planDigest).toBe(a.planDigest);}}
+  for(const client of ["codex","cursor","vscode","github-copilot","kiro"]){for(const scope of ["project","user"]){const p:any=base(client,scope);p.workspace=realpathSync(workspace);p.schemaVersion=1;p.profileKey=`${client}:${scope}:${workspace}`;p.fallbackPolicy="fail-closed";p.fallbacks=[];p.appTaskLane={enabled:true,model:"gpt-5.6-luna",effort:"max"};p.createdAt=p.updatedAt="x";p.pluginVersion="0.5.0";const a=renderAdapter(p,workspace);expect(a.files).toHaveLength(3);expect(a.files.map(file=>file.role)).toEqual(["routine","high","advisor"]);expect(a.files.some(file=>file.content.includes("gpt-5.6-luna"))).toBe(false);expect(a.files.every(f=>f.content.includes("sol-advisor-managed:v1"))).toBe(true);if(client==="cursor")expect(a.warnings.join(" ")).toContain("may fall back");expect(renderAdapter(p,workspace).planDigest).toBe(a.planDigest);}}
  });
  test("requires exact consent, refuses conflict, backs up updates, and uninstalls exact files",async()=>{
   await callTool("save_preferences",base());const preview:any=await callTool("render_client_adapter",{workspace});
@@ -97,8 +109,8 @@ describe("adapter rendering and lifecycle",()=>{
  });
  test("refuses traversal, symlink paths, and modified managed uninstall",async()=>{
   await callTool("save_preferences",base());await expect(callTool("render_client_adapter",{workspace:join(workspace,"..","missing")})).rejects.toThrow();
-  mkdirSync(join(workspace,".codex"));symlinkSync(root,join(workspace,".codex","agents"));await expect(callTool("render_client_adapter",{workspace})).rejects.toThrow("symlink");
-  rmSync(join(workspace,".codex","agents"));const preview:any=await callTool("render_client_adapter",{workspace});await callTool("install_client_adapter",{workspace,confirmationToken:preview.confirmationToken});writeFileSync(preview.files[0].path,readFileSync(preview.files[0].path,"utf8")+"changed");const ask:any=await callTool("uninstall_client_adapter",{});await expect(callTool("uninstall_client_adapter",{confirmationToken:ask.confirmationToken})).rejects.toThrow("changed");
+  mkdirSync(join(workspace,".codex"));symlinkSync(root,join(workspace,".codex","agents"),process.platform==="win32"?"junction":undefined);await expect(callTool("render_client_adapter",{workspace})).rejects.toThrow("symlink");
+  rmdirSync(join(workspace,".codex","agents"));const preview:any=await callTool("render_client_adapter",{workspace});await callTool("install_client_adapter",{workspace,confirmationToken:preview.confirmationToken});writeFileSync(preview.files[0].path,readFileSync(preview.files[0].path,"utf8")+"changed");const ask:any=await callTool("uninstall_client_adapter",{});await expect(callTool("uninstall_client_adapter",{confirmationToken:ask.confirmationToken})).rejects.toThrow("changed");
  });
  test("user scope requires separate consent",async()=>{
   await callTool("save_preferences",base("codex","user"));const p:any=await callTool("render_client_adapter",{workspace});await expect(callTool("install_client_adapter",{workspace,confirmationToken:p.confirmationToken})).rejects.toThrow("separate exact user-scope");

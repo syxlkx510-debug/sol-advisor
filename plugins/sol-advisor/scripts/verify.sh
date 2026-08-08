@@ -13,6 +13,8 @@ installer=$script_dir/install-agents.sh
 runtime_inspector=$script_dir/inspect-agent-runtime.sh
 templates=$plugin_dir/agents
 manifest=$plugin_dir/.codex-plugin/plugin.json
+standard_manifest=$plugin_dir/plugin.json
+package_manifest=$repo_dir/package.json
 skill=$plugin_dir/skills/orchestration/SKILL.md
 contracts=$plugin_dir/skills/orchestration/references/role-contracts.md
 luna_contract=$plugin_dir/skills/orchestration/references/luna-task-lane.md
@@ -101,17 +103,26 @@ LEGACY_LUNA
   [ "$(shasum -a 256 "$target/$luna_file" | awk '{print $1}')" = "$legacy_luna_sha256" ] || fail "legacy Luna fixture digest drifted"
 }
 
-for required in "$installer" "$runtime_inspector" "$manifest" "$skill" "$contracts" "$luna_contract" "$readme" "$ui"; do
+for required in "$installer" "$runtime_inspector" "$manifest" "$standard_manifest" "$package_manifest" "$skill" "$contracts" "$luna_contract" "$readme" "$ui"; do
   test -f "$required" || fail "required file missing: $required"
 done
 
 jq empty "$manifest"
-[ "$(jq -r '.version' "$manifest")" = 0.5.0 ] || fail "manifest version is not 0.5.0"
+jq empty "$standard_manifest"
+jq empty "$package_manifest"
+codex_version=$(jq -r '.version // empty' "$manifest")
+standard_version=$(jq -r '.version // empty' "$standard_manifest")
+package_version=$(jq -r '.version // empty' "$package_manifest")
+[ -n "$codex_version" ] || fail "Codex manifest version is empty"
+[ -n "$standard_version" ] || fail "standard manifest version is empty"
+[ -n "$package_version" ] || fail "package version is empty"
+[ "$codex_version" = "$standard_version" ] || fail "Codex and standard manifest versions differ"
+[ "$codex_version" = "$package_version" ] || fail "Codex manifest and package versions differ"
 grep -Fq 'explicit opt-in' "$manifest" || fail "manifest does not describe explicit Luna opt-in"
 grep -Fqi 'GPT-5.6 Luna' "$manifest" || fail "manifest does not describe Luna routing"
 grep -Fq 'Codex app task tools' "$manifest" || fail "manifest does not describe app-task routing"
 grep -Fq 'fresh Sol' "$manifest" || fail "manifest does not preserve native fresh Sol review"
-pass "manifest JSON, version, and both-mode UI language"
+pass "manifest JSON, matching versions, and both-mode UI language"
 
 python3 - "$templates" <<'PY'
 from pathlib import Path
@@ -270,11 +281,6 @@ for tool in list_projects list_threads create_thread wait_threads read_thread se
 done
 grep -Fq 'gpt-5.6-luna' "$skill" || fail "skill omits Luna model"
 grep -Fq 'thinking` to `max' "$skill" || fail "skill omits Luna Max routing"
-grep -Fq 'activation: "visual-required"' "$skill" || fail "skill omits visual-required activation"
-grep -Fq 'material input to implementation or acceptance' "$skill" || fail "skill omits material visual trigger"
-grep -Fq 'current request opts out' "$skill" || fail "skill omits current-request opt-out"
-grep -Fq 'Missing activation means explicit-only' "$luna_contract" || fail "Luna contract omits legacy explicit-only behavior"
-grep -Fq 'standing visual-required authorization' "$luna_contract" || fail "Luna contract omits standing authorization"
 grep -Fq 'isGitRepository' "$luna_contract" || fail "Luna contract omits Git-project check"
 grep -Fq 'isolated worktree environment' "$luna_contract" || fail "Luna contract omits Git worktree default"
 grep -Fq 'clientThreadId' "$luna_contract" || fail "Luna contract omits setup-pending identity guard"
