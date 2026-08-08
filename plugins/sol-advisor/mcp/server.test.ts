@@ -69,6 +69,18 @@ describe("configuration",()=>{
   expect((await callTool("get_setup_status") as any).status).toBe("ready");
   await expect(callTool("save_preferences",{...base(),appTaskLane:{enabled:true,activation:"visual-required"}})).rejects.toThrow("unknown appTaskLane field: activation");
  });
+ test("persists Luna routine independently of the explicit app-task lane",async()=>{
+  const candidate:any=base();
+  candidate.roles.routine={model:"gpt-5.6-luna",effort:"max"};
+  candidate.appTaskLane={enabled:true};
+  const saved:any=await callTool("save_preferences",candidate);
+  expect(saved.preferences.roles.routine).toEqual({model:"gpt-5.6-luna",effort:"max"});
+  expect(saved.preferences.appTaskLane).toEqual({enabled:true,model:"gpt-5.6-luna",effort:"max"});
+  const preview:any=await callTool("render_client_adapter",{workspace});
+  const routine=preview.files.find((file:any)=>file.role==="routine");
+  expect(routine.content).toContain('model = "gpt-5.6-luna"');
+  expect(routine.content).toContain('model_reasoning_effort = "max"');
+ });
  test("persists profiles by client scope and workspace",async()=>{
   await callTool("save_preferences",base("codex","project"));
   const other=join(root,"other");mkdirSync(other);await callTool("save_preferences",{...base("cursor","project"),workspace:other});
