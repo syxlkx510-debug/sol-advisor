@@ -155,11 +155,11 @@ function removeJournal(){if(existsSync(journalPath())){rmSync(journalPath(),{for
 function currentHash(path:string){return existsSync(path)&&lstatSync(path).isFile()&&!lstatSync(path).isSymbolicLink()?sha(readFileSync(path)):undefined;}
 type AdapterStatus = "missing" | "current" | "stale" | "conflict";
 function inspectAdapter(preferences: Preferences, preview: ReturnType<typeof renderAdapter>) {
-  const owned=loadManifest().files.filter(file=>file.profileKey===preferences.profileKey), ownedByPath=new Map(owned.map(file=>[file.path,file]));
+  const manifest=loadManifest(), owned=manifest.files.filter(file=>file.profileKey===preferences.profileKey), ownedByPath=new Map(manifest.files.map(file=>[file.path,file]));
   let adapterStatus:AdapterStatus="current";
   const files=preview.files.map(expected=>{
     const owner=ownedByPath.get(expected.path), actual=currentHash(expected.path), exists=existsSync(expected.path);
-    const state:AdapterStatus=!owner ? (exists ? "conflict" : "missing") : (actual===expected.hash&&owner.hash===expected.hash ? "current" : "stale");
+    const state:AdapterStatus=owner&&owner.profileKey!==preferences.profileKey ? "conflict" : !owner ? (exists ? "conflict" : "missing") : (actual===expected.hash&&owner.hash===expected.hash ? "current" : "stale");
     if(state==="conflict")adapterStatus="conflict";
     else if(state==="stale"&&adapterStatus!=="conflict")adapterStatus="stale";
     else if(state==="missing"&&adapterStatus==="current")adapterStatus="missing";
@@ -203,6 +203,7 @@ function recoverTransaction(){
   if(tx.phase==="manifest-committed"){for(const e of tx.entries){if(e.stage&&existsSync(e.stage))removeExact(e.stage,e.newHash,"recovery stage");if(e.quarantine&&existsSync(e.quarantine))removeExact(e.quarantine,e.originalHash!,"recovery quarantine");}removeJournal();return;}
   if(tx.operation==="install")rollbackInstall(tx);else if(tx.operation==="uninstall")rollbackUninstall(tx);else throw new Error("unknown transaction operation");
 }
+function requireNoPendingTransactionRecovery(){if(existsSync(journalPath()))throw new Error("pending transaction recovery required");}
 function installAdapter(args:any) {
   const state=configState(); if(state.status!=="ready") throw new Error(`setup is ${state.status}; run the parent-chat setup interview first`);
   rejectUnknown(args,["workspace","confirmationToken","userScopeConfirmationToken"],"install");
@@ -270,7 +271,8 @@ export const tools = [
 ];
 export async function callTool(name:string,args:any={}) {
   const allowed:Record<string,string[]>={get_setup_status:[],get_preferences:[],save_preferences:["client","scope","workspace","orchestrator","roles","appTaskLane"],render_client_adapter:["workspace"],install_client_adapter:["workspace","confirmationToken","userScopeConfirmationToken"],uninstall_client_adapter:["confirmationToken"],validate_configuration:["workspace"],reset_configuration:["confirmationToken"]};
-  if(!(name in allowed)) throw new Error(`unknown tool: ${name}`); rejectUnknown(args,allowed[name]!,name); recoverTransaction();
+  const mutationAuthorized=new Set(["save_preferences","install_client_adapter","uninstall_client_adapter","reset_configuration"]);
+  if(!(name in allowed)) throw new Error(`unknown tool: ${name}`); rejectUnknown(args,allowed[name]!,name); if(mutationAuthorized.has(name))recoverTransaction();else requireNoPendingTransactionRecovery();
   if(name!=="save_preferences") for(const [key,value] of Object.entries(args)) if(typeof value==="string"&&/[\r\n\0]/.test(value)) throw new Error(`${key} contains control characters`);
   if(name==="get_setup_status") return configState();
   if(name==="get_preferences") { const s=configState(); if(s.status!=="ready") throw new Error(`setup is ${s.status}`); return s.preferences; }
