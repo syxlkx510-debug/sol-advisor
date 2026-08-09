@@ -29,6 +29,9 @@ type Manifest = { schemaVersion: 1; files: ManagedFile[]; updatedAt: string };
 const pluginRoot = resolve(import.meta.dir, "..");
 let pinnedDataDir:{lexical:string;real:string;dev:number;ino:number}|undefined;
 export function __resetDataPinForTests(){pinnedDataDir=undefined;}
+let homeResolverForTests:(()=>string)|undefined;
+export function __setHomeResolverForTests(resolver:(()=>string)|undefined){homeResolverForTests=resolver;}
+function realHome(){return realpathSync(homeResolverForTests?homeResolverForTests():homedir());}
 function dataDir(): string {
   const raw=process.env.PLUGIN_DATA;
   if (!raw || !isAbsolute(raw)) throw new Error("PLUGIN_DATA must be an explicit absolute existing directory");
@@ -100,7 +103,7 @@ function safeWorkspace(input: unknown): string {
   return realpathSync(lexical);
 }
 function destinationBase(scope: Scope, workspace: string): string {
-  return scope === "project" ? join(workspace,".codex","agents") : join(realpathSync(homedir()),".codex","agents");
+  return scope === "project" ? join(workspace,".codex","agents") : join(realHome(),".codex","agents");
 }
 function assertNoSymlinkPath(path: string, allowedRoot: string) {
   const rel = relative(allowedRoot, path);
@@ -127,7 +130,7 @@ export function renderAdapter(preferences: Preferences, workspaceInput: string, 
   const errors = validatePreferences(preferences); if (errors.length) throw new Error(errors.join("; "));
   const workspace = safeWorkspace(workspaceInput); if(workspace!==preferences.workspace) throw new Error("workspace does not match the active saved profile");
   const base = destinationBase(preferences.scope, workspace);
-  const allowedRoot = preferences.scope === "project" ? workspace : realpathSync(homedir());
+  const allowedRoot = preferences.scope === "project" ? workspace : realHome();
   const files = (["routine","high","advisor"] as RoleName[]).map(role => {
     const path = join(base,roleFiles[role]); assertNoSymlinkPath(path,allowedRoot);
     const content = renderOne(role,preferences.roles[role]);
@@ -151,8 +154,8 @@ function writeJournal(tx:TransactionJournal){atomicWrite(journalPath(),JSON.stri
 function removeJournal(){if(existsSync(journalPath())){rmSync(journalPath(),{force:true});syncDir(dirname(journalPath()));}}
 function currentHash(path:string){return existsSync(path)&&lstatSync(path).isFile()&&!lstatSync(path).isSymbolicLink()?sha(readFileSync(path)):undefined;}
 type AdapterStatus = "missing" | "current" | "stale" | "conflict";
-function inspectAdapter(preferences: Preferences, workspace: string) {
-  const preview=renderAdapter(preferences,workspace,{registerPreview:false}), owned=loadManifest().files.filter(file=>file.profileKey===preferences.profileKey), ownedByPath=new Map(owned.map(file=>[file.path,file]));
+function inspectAdapter(preferences: Preferences, preview: ReturnType<typeof renderAdapter>) {
+  const owned=loadManifest().files.filter(file=>file.profileKey===preferences.profileKey), ownedByPath=new Map(owned.map(file=>[file.path,file]));
   let adapterStatus:AdapterStatus="current";
   const files=preview.files.map(expected=>{
     const owner=ownedByPath.get(expected.path), actual=currentHash(expected.path), exists=existsSync(expected.path);
@@ -217,7 +220,7 @@ function installAdapter(args:any) {
   try{
     for(const e of entries){mkdirSync(dirname(e.target),{recursive:true});if(e.backup){const privateBackups=backupDir();if(dirname(e.backup)!==privateBackups)throw new Error("backup destination escaped private backup directory");copyFileSync(e.target,e.backup);chmodSync(e.backup,0o600);syncFile(e.backup);syncDir(dirname(e.backup));if(currentHash(e.backup)!==e.originalHash)throw new Error(`backup hash mismatch: ${e.target}`);}writeFileSync(e.stage!,preview.files.find((f:any)=>f.path===e.target)!.content,{encoding:"utf8",mode:0o600,flag:"wx"});chmodSync(e.stage!,0o600);syncFile(e.stage!);syncDir(dirname(e.stage!));}
     transactionFaultForTests?.("install-before-targets");
-    for(let i=0;i<entries.length;i++){const e=entries[i]!;assertNoSymlinkPath(e.target,state.preferences!.scope==="project"?state.preferences!.workspace:realpathSync(homedir()));const actual=currentHash(e.target);if(e.wasMissing){if(actual!==undefined||existsSync(e.target))throw new Error(`target appeared after preview: ${e.target}`);}else{if(actual!==e.originalHash)throw new Error(`managed target changed after preview: ${e.target}`);const before=lstatSync(e.target);transactionFaultForTests?.(`install-before-quarantine-${i+1}`);if(existsSync(e.quarantine!))throw new Error(`install quarantine conflict: ${e.quarantine}`);renameSync(e.target,e.quarantine!);syncDir(dirname(e.target));const quarantined=lstatSync(e.quarantine!);if(quarantined.isSymbolicLink()||!quarantined.isFile()||quarantined.dev!==before.dev||quarantined.ino!==before.ino||currentHash(e.quarantine!)!==e.originalHash){if(!existsSync(e.target)){renameSync(e.quarantine!,e.target);syncDir(dirname(e.target));}throw new Error(`install quarantine identity/hash mismatch: ${e.target}`);}}linkSync(e.stage!,e.target);rmSync(e.stage!,{force:true});syncDir(dirname(e.target));if(currentHash(e.target)!==e.newHash)throw new Error(`committed target hash mismatch: ${e.target}`);tx.committed=i+1;tx.phase="targets-committed";writeJournal(tx);transactionFaultForTests?.(`install-target-${i+1}`);}
+    for(let i=0;i<entries.length;i++){const e=entries[i]!;assertNoSymlinkPath(e.target,state.preferences!.scope==="project"?state.preferences!.workspace:realHome());const actual=currentHash(e.target);if(e.wasMissing){if(actual!==undefined||existsSync(e.target))throw new Error(`target appeared after preview: ${e.target}`);}else{if(actual!==e.originalHash)throw new Error(`managed target changed after preview: ${e.target}`);const before=lstatSync(e.target);transactionFaultForTests?.(`install-before-quarantine-${i+1}`);if(existsSync(e.quarantine!))throw new Error(`install quarantine conflict: ${e.quarantine}`);renameSync(e.target,e.quarantine!);syncDir(dirname(e.target));const quarantined=lstatSync(e.quarantine!);if(quarantined.isSymbolicLink()||!quarantined.isFile()||quarantined.dev!==before.dev||quarantined.ino!==before.ino||currentHash(e.quarantine!)!==e.originalHash){if(!existsSync(e.target)){renameSync(e.quarantine!,e.target);syncDir(dirname(e.target));}throw new Error(`install quarantine identity/hash mismatch: ${e.target}`);}}linkSync(e.stage!,e.target);rmSync(e.stage!,{force:true});syncDir(dirname(e.target));if(currentHash(e.target)!==e.newHash)throw new Error(`committed target hash mismatch: ${e.target}`);tx.committed=i+1;tx.phase="targets-committed";writeJournal(tx);transactionFaultForTests?.(`install-target-${i+1}`);}
     atomicWrite(manifestPath(),newManifest);transactionFaultForTests?.("install-manifest-commit");tx.phase="manifest-committed";writeJournal(tx);transactionFaultForTests?.("install-journal-commit");for(const e of entries)if(e.quarantine&&existsSync(e.quarantine))removeExact(e.quarantine,e.originalHash!,"committed quarantine");removeJournal();
   }catch(error){if((error instanceof Error&&error.message==="__SIMULATED_CRASH__")||tx.phase==="manifest-committed")throw error;try{rollbackInstall(tx);}catch(rollback){throw new Error(`${String(error)}; rollback incomplete: ${String(rollback)}`);}throw error;}
   return {installed:installed.map(x=>x.path),backups:installed.flatMap(x=>x.backup?[x.backup]:[]),guidance:preview.afterInstall};
@@ -229,7 +232,7 @@ function uninstallAdapter(args:any) {
   for(const f of selected)requireExactManaged(f.path,f.hash);
   const originalManifest=readFileSync(manifestPath(),"utf8"),newManifest=JSON.stringify({schemaVersion:1,files:manifest.files.filter(f=>f.profileKey!==state.preferences!.profileKey),updatedAt:new Date().toISOString()},null,2)+"\n";
   const entries:TxEntry[]=selected.map(f=>({target:f.path,quarantine:join(dirname(f.path),`.${basename(f.path)}.${randomUUID()}.quarantine`),newHash:"",originalHash:f.hash}));const tx:TransactionJournal={schemaVersion:1,operation:"uninstall",phase:"prepared",committed:0,entries,manifestExisted:true,originalManifest,newManifest,profileKey:state.preferences!.profileKey};writeJournal(tx);
-  try{for(let i=0;i<entries.length;i++){const e=entries[i]!;assertNoSymlinkPath(e.target,state.preferences!.scope==="project"?state.preferences!.workspace:realpathSync(homedir()));if(currentHash(e.target)!==e.originalHash)throw new Error(`managed file changed before uninstall commit: ${e.target}`);const before=lstatSync(e.target);transactionFaultForTests?.(`uninstall-before-quarantine-${i+1}`);if(existsSync(e.quarantine!))throw new Error(`quarantine conflict: ${e.quarantine}`);renameSync(e.target,e.quarantine!);syncDir(dirname(e.target));const quarantined=lstatSync(e.quarantine!);if(quarantined.isSymbolicLink()||!quarantined.isFile()||quarantined.dev!==before.dev||quarantined.ino!==before.ino||currentHash(e.quarantine!)!==e.originalHash){if(!existsSync(e.target)){renameSync(e.quarantine!,e.target);syncDir(dirname(e.target));}throw new Error(`uninstall quarantine identity/hash mismatch: ${e.target}`);}tx.committed=i+1;tx.phase="targets-committed";writeJournal(tx);transactionFaultForTests?.(`uninstall-target-${i+1}`);}atomicWrite(manifestPath(),newManifest);transactionFaultForTests?.("uninstall-manifest-commit");tx.phase="manifest-committed";writeJournal(tx);transactionFaultForTests?.("uninstall-journal-commit");for(const e of entries)if(e.quarantine&&existsSync(e.quarantine))removeExact(e.quarantine,e.originalHash!,"committed quarantine");removeJournal();}
+  try{for(let i=0;i<entries.length;i++){const e=entries[i]!;assertNoSymlinkPath(e.target,state.preferences!.scope==="project"?state.preferences!.workspace:realHome());if(currentHash(e.target)!==e.originalHash)throw new Error(`managed file changed before uninstall commit: ${e.target}`);const before=lstatSync(e.target);transactionFaultForTests?.(`uninstall-before-quarantine-${i+1}`);if(existsSync(e.quarantine!))throw new Error(`quarantine conflict: ${e.quarantine}`);renameSync(e.target,e.quarantine!);syncDir(dirname(e.target));const quarantined=lstatSync(e.quarantine!);if(quarantined.isSymbolicLink()||!quarantined.isFile()||quarantined.dev!==before.dev||quarantined.ino!==before.ino||currentHash(e.quarantine!)!==e.originalHash){if(!existsSync(e.target)){renameSync(e.quarantine!,e.target);syncDir(dirname(e.target));}throw new Error(`uninstall quarantine identity/hash mismatch: ${e.target}`);}tx.committed=i+1;tx.phase="targets-committed";writeJournal(tx);transactionFaultForTests?.(`uninstall-target-${i+1}`);}atomicWrite(manifestPath(),newManifest);transactionFaultForTests?.("uninstall-manifest-commit");tx.phase="manifest-committed";writeJournal(tx);transactionFaultForTests?.("uninstall-journal-commit");for(const e of entries)if(e.quarantine&&existsSync(e.quarantine))removeExact(e.quarantine,e.originalHash!,"committed quarantine");removeJournal();}
   catch(error){if((error instanceof Error&&error.message==="__SIMULATED_CRASH__")||tx.phase==="manifest-committed")throw error;try{rollbackUninstall(tx);}catch(rollback){throw new Error(`${String(error)}; rollback incomplete: ${String(rollback)}`);}throw error;}
   return {removed:selected.map(f=>f.path),guidance:"Reload the client or start a new chat."};
 }
@@ -275,7 +278,7 @@ export async function callTool(name:string,args:any={}) {
   if(name==="render_client_adapter") { const s=configState(); if(s.status!=="ready") throw new Error(`setup is ${s.status}`); return renderAdapter(s.preferences!,args.workspace); }
   if(name==="install_client_adapter") return installAdapter(args);
   if(name==="uninstall_client_adapter") return uninstallAdapter(args);
-  if(name==="validate_configuration") { const s=configState(); return {status:s.status,valid:s.status==="ready",detail:s.detail,...(s.status==="ready"&&args.workspace?{preview:renderAdapter(s.preferences!,args.workspace),...inspectAdapter(s.preferences!,args.workspace)}:{})}; }
+  if(name==="validate_configuration") { const s=configState(); if(s.status!=="ready")return {status:s.status,valid:false,detail:s.detail}; if(!args.workspace)return {status:s.status,valid:true,detail:s.detail}; const preview=renderAdapter(s.preferences!,args.workspace,{registerPreview:false});return {status:s.status,valid:true,detail:s.detail,preview,...inspectAdapter(s.preferences!,preview)}; }
   if(name==="reset_configuration") return resetConfiguration(args);
   throw new Error(`unknown tool: ${name}`);
 }

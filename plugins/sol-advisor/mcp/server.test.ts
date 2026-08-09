@@ -3,13 +3,15 @@ import { mkdtempSync, mkdirSync, readFileSync, rmSync, rmdirSync, symlinkSync, w
 import { dirname, join } from "node:path";
 import { homedir, tmpdir } from "node:os";
 import { __resetDataPinForTests, __setManifestWriteFaultForTests, callTool, handle, renderAdapter } from "./server";
+import * as server from "./server";
 import { __setWindowsAclReaderForTests } from "./private-directory";
 
 let root="", data="", workspace="";
 const base=(scope:"project"|"user"="project")=>({client:"codex",scope,workspace,orchestrator:{model:"inherit",recommendation:{model:"gpt-5.6-sol",effort:"high"}},roles:{routine:{model:"gpt-5.6-luna",effort:"max"},high:{model:"gpt-5.6-terra",effort:"xhigh"},advisor:{model:"gpt-5.6-sol",effort:"xhigh",readonly:true}}});
+const setHomeResolverForTests=(resolver?:()=>string)=>(server as any).__setHomeResolverForTests?.(resolver);
 const privateWindowsAcl=()=>({owner:"S-1-5-21-test",currentUser:"S-1-5-21-test",rules:[{identity:"S-1-5-21-test",access:"Allow" as const,rights:2032127}]});
-beforeEach(()=>{__resetDataPinForTests();__setWindowsAclReaderForTests(privateWindowsAcl);root=realpathSync(mkdtempSync(join(tmpdir(),"sol-advisor-test-")));data=join(root,"data");workspace=join(root,"work");mkdirSync(data);if(process.platform!=="win32")chmodSync(data,0o700);mkdirSync(workspace);process.env.PLUGIN_DATA=data;});
-afterEach(()=>{__setManifestWriteFaultForTests(undefined);__setWindowsAclReaderForTests();__resetDataPinForTests();delete process.env.PLUGIN_DATA;rmSync(root,{recursive:true,force:true});});
+beforeEach(()=>{setHomeResolverForTests();__resetDataPinForTests();__setWindowsAclReaderForTests(privateWindowsAcl);root=realpathSync(mkdtempSync(join(tmpdir(),"sol-advisor-test-")));data=join(root,"data");workspace=join(root,"work");mkdirSync(data);if(process.platform!=="win32")chmodSync(data,0o700);mkdirSync(workspace);process.env.PLUGIN_DATA=data;});
+afterEach(()=>{__setManifestWriteFaultForTests(undefined);__setWindowsAclReaderForTests();__resetDataPinForTests();setHomeResolverForTests();delete process.env.PLUGIN_DATA;rmSync(root,{recursive:true,force:true});});
 
 describe("MCP protocol",()=>{
  test("initialize ping and tools",async()=>{
@@ -50,6 +52,9 @@ describe("configuration",()=>{
   mkdirSync(data,{recursive:true});writeFileSync(join(data,"config.json"),"{");expect((await callTool("get_setup_status") as any).status).toBe("corrupt");
   writeFileSync(join(data,"config.json"),JSON.stringify({schemaVersion:0}));expect((await callTool("get_setup_status") as any).status).toBe("schema-old");
   await callTool("save_preferences",base());expect((await callTool("get_setup_status") as any).status).toBe("ready");
+ });
+ test("validate_configuration without a workspace retains ready logical validity",async()=>{
+  await callTool("save_preferences",base());const result:any=await callTool("validate_configuration",{});expect(result.status).toBe("ready");expect(result.valid).toBe(true);expect(result.preview).toBeUndefined();
  });
  test("rejects secrets and creates update backup",async()=>{
   await expect(callTool("save_preferences",{...base(),roles:{...(base() as any).roles,advisor:{...(base() as any).roles.advisor,token:"SECRET2"}}})).rejects.toThrow("forbidden");
@@ -111,6 +116,11 @@ describe("adapter rendering and lifecycle",()=>{
   ]);
   expect(preview.warnings).toEqual([]);
  });
+ test("validate_configuration returns a non-installable inspection preview",async()=>{
+  await callTool("save_preferences",base());const inspected:any=await callTool("validate_configuration",{workspace});
+  expect(inspected.preview.confirmationToken).toBeUndefined();expect(inspected.preview.userScopeConfirmationToken).toBeUndefined();expect(inspected.preview.expiresAt).toBeUndefined();
+  await expect(callTool("install_client_adapter",{workspace,confirmationToken:inspected.preview.confirmationToken})).rejects.toThrow("exact unexpired");
+ });
  test("validate_configuration reports missing, conflict, current, and stale adapter files",async()=>{
   await callTool("save_preferences",base());let inspected:any=await callTool("validate_configuration",{workspace});expect(inspected.adapterStatus).toBe("missing");expect(inspected.files.map((file:any)=>file.state)).toEqual(["missing","missing","missing"]);
   let preview:any=await callTool("render_client_adapter",{workspace});mkdirSync(dirname(preview.files[0].path),{recursive:true});writeFileSync(preview.files[0].path,"USER OWNED");
@@ -166,11 +176,13 @@ describe("adapter rendering and lifecycle",()=>{
    preview=await callTool("render_client_adapter",{workspace});await callTool("install_client_adapter",{workspace,confirmationToken:preview.confirmationToken});const ask:any=await callTool("uninstall_client_adapter",{});__setManifestWriteFaultForTests(point=>{if(point==="uninstall-target-2")throw new Error("__SIMULATED_CRASH__")});await expect(callTool("uninstall_client_adapter",{confirmationToken:ask.confirmationToken})).rejects.toThrow("SIMULATED_CRASH");expect(existsSync(join(data,"transaction.json"))).toBe(true);__setManifestWriteFaultForTests(undefined);expect((await callTool("get_setup_status") as any).status).toBe("ready");for(const f of preview.files)expect(readFileSync(f.path,"utf8")).toBe(f.content);
   });
 
- test("refuses a second Codex profile that claims installed paths",async()=>{
-  await callTool("save_preferences",base());const first:any=await callTool("render_client_adapter",{workspace});await callTool("install_client_adapter",{workspace,confirmationToken:first.confirmationToken});
-  const path=join(data,"config.json"),stored=JSON.parse(readFileSync(path,"utf8")),profileKey=`codex:project:${workspace}:other`;stored.profiles[profileKey]={...stored.profiles[stored.activeProfile],profileKey};stored.activeProfile=profileKey;writeFileSync(path,JSON.stringify(stored));
-  const second:any=await callTool("render_client_adapter",{workspace});await expect(callTool("install_client_adapter",{workspace,confirmationToken:second.confirmationToken})).rejects.toThrow("different profile");
-  const manifest=JSON.parse(readFileSync(join(data,"managed-files.json"),"utf8"));expect(new Set(manifest.files.map((file:any)=>file.path)).size).toBe(manifest.files.length);
+ test("separate user-scope Codex profiles cannot take each other's shared home paths",async()=>{
+  const home=join(root,"home"),workspaceA=join(root,"workspace-a"),workspaceB=join(root,"workspace-b");mkdirSync(home);mkdirSync(workspaceA);mkdirSync(workspaceB);setHomeResolverForTests(()=>home);
+  const savedA:any=await callTool("save_preferences",{...base("user"),workspace:workspaceA}),previewA:any=await callTool("render_client_adapter",{workspace:workspaceA});expect(previewA.files.every((file:any)=>file.path.startsWith(join(realpathSync(home),".codex","agents")))).toBe(true);
+  await callTool("install_client_adapter",{workspace:workspaceA,confirmationToken:previewA.confirmationToken,userScopeConfirmationToken:previewA.userScopeConfirmationToken});const before=previewA.files.map((file:any)=>readFileSync(file.path,"utf8"));
+  const savedB:any=await callTool("save_preferences",{...base("user"),workspace:workspaceB}),validatedB:any=await callTool("validate_configuration",{workspace:workspaceB});expect(validatedB.adapterStatus).toBe("conflict");
+  const previewB:any=await callTool("render_client_adapter",{workspace:workspaceB});await expect(callTool("install_client_adapter",{workspace:workspaceB,confirmationToken:previewB.confirmationToken,userScopeConfirmationToken:previewB.userScopeConfirmationToken})).rejects.toThrow("different profile");
+  expect(await callTool("uninstall_client_adapter",{})).toEqual({removed:[]});const manifest=JSON.parse(readFileSync(join(data,"managed-files.json"),"utf8"));expect(manifest.files.every((file:any)=>file.profileKey===savedA.profileKey)).toBe(true);expect(previewA.files.map((file:any)=>readFileSync(file.path,"utf8"))).toEqual(before);expect(savedB.profileKey).not.toBe(savedA.profileKey);
  });
 
  test("duplicate manifest path ownership is rejected",async()=>{
