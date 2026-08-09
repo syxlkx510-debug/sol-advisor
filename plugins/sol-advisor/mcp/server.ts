@@ -10,8 +10,8 @@ export const MANAGED_MARKER = "sol-advisor-managed:v1";
 const previewPlans=new Map<string,{digest:string;expires:number;userToken?:string;used:boolean}>();
 let transactionFaultForTests:((point:string)=>void)|undefined;
 export function __setManifestWriteFaultForTests(fault:((point:string)=>void)|undefined){transactionFaultForTests=fault;}
-export const CLIENTS = ["codex", "cursor", "vscode", "github-copilot", "kiro"] as const;
-export type Client = typeof CLIENTS[number];
+export const CLIENT = "codex" as const;
+export type Client = typeof CLIENT;
 export type Scope = "project" | "user";
 export type RoleName = "routine" | "high" | "advisor";
 export type RolePreference = { model: string; effort?: string; readonly?: boolean };
@@ -78,7 +78,7 @@ export function validatePreferences(value: any): string[] {
   unknown(value.roles,["routine","high","advisor"],"roles"); for(const role of ["routine","high","advisor"]) unknown(value.roles?.[role],["model","effort","readonly"],`role ${role}`);
   unknown(value.appTaskLane,["enabled","model","effort"],"appTaskLane");
   if (value.schemaVersion !== 1) errors.push("schemaVersion must be 1");
-  if (!CLIENTS.includes(value.client)) errors.push("client is unsupported");
+  if (value.client !== CLIENT) errors.push("client must be codex");
   if (!(value.scope === "project" || value.scope === "user")) errors.push("scope must be project or user");
   if (value.orchestrator?.model !== "inherit") errors.push("orchestrator must inherit the parent model and effort");
   if (value.fallbackPolicy !== "fail-closed" || !Array.isArray(value.fallbacks) || value.fallbacks.length !== 0) errors.push("fallbacks must be empty with fail-closed policy");
@@ -89,10 +89,7 @@ export function validatePreferences(value: any): string[] {
     if (r.effort !== undefined) exactString(r.effort, `roles.${role}.effort`, errors);
   }
   if (value.roles?.advisor?.readonly !== true) errors.push("advisor readonly preference must be true");
-  if(typeof value.profileKey!=="string"||!value.profileKey||typeof value.workspace!=="string"||!isAbsolute(value.workspace)) errors.push("profileKey and absolute workspace are required");
-  if (["vscode", "github-copilot", "kiro"].includes(value.client)) {
-    for (const role of ["routine", "high", "advisor"] as RoleName[]) if (value.roles?.[role]?.effort !== undefined) errors.push(`${value.client} cannot persist a per-agent effort claim for ${role}`);
-  }
+  if(typeof value.profileKey!=="string"||!value.profileKey.startsWith("codex:")||typeof value.workspace!=="string"||!isAbsolute(value.workspace)) errors.push("Codex profileKey and absolute workspace are required");
   if (value.appTaskLane !== undefined && (value.appTaskLane.enabled !== true || value.appTaskLane.model !== "gpt-5.6-luna" || value.appTaskLane.effort !== "max")) errors.push("appTaskLane is an explicit opt-in gpt-5.6-luna/max lane only");
   return errors;
 }
@@ -102,10 +99,8 @@ function safeWorkspace(input: unknown): string {
   if (!existsSync(lexical) || !lstatSync(lexical).isDirectory() || lstatSync(lexical).isSymbolicLink()) throw new Error("workspace must be an existing, non-symlink directory");
   return realpathSync(lexical);
 }
-function destinationBase(client: Client, scope: Scope, workspace: string): string {
-  if (scope === "project") return client === "codex" ? join(workspace,".codex","agents") : client === "cursor" ? join(workspace,".cursor","agents") : (client === "vscode" || client === "github-copilot") ? join(workspace,".github","agents") : join(workspace,".kiro","agents");
-  const home = realpathSync(homedir());
-  return client === "codex" ? join(home,".codex","agents") : client === "cursor" ? join(home,".cursor","agents") : (client === "vscode" || client === "github-copilot") ? join(home,".copilot","agents") : join(home,".kiro","agents");
+function destinationBase(scope: Scope, workspace: string): string {
+  return scope === "project" ? join(workspace,".codex","agents") : join(realpathSync(homedir()),".codex","agents");
 }
 function assertNoSymlinkPath(path: string, allowedRoot: string) {
   const rel = relative(allowedRoot, path);
@@ -122,37 +117,30 @@ function instructions(role: RoleName): string {
   if (role === "routine") return "Implement bounded, well-specified, mechanical work. Preserve the settled architecture, owned files, interfaces, and concurrent edits. Run requested checks and report evidence.";
   return "Implement complex, security-sensitive, algorithmic, debugging, or wide-blast-radius work within the settled architecture. Surface ambiguity, preserve concurrent edits, and report verification evidence.";
 }
-function filenames(client: Client): Record<RoleName,string> {
-  const ext = client === "codex" ? ".toml" : client === "vscode" || client === "github-copilot" ? ".agent.md" : ".md";
-  return { routine:`sol-advisor-routine${ext}`, high:`sol-advisor-high${ext}`, advisor:`sol-advisor-advisor${ext}` };
-}
-function renderOne(client: Client, role: RoleName, pref: RolePreference): string {
-  const marker = client === "codex" ? `# ${MANAGED_MARKER}` : `<!-- ${MANAGED_MARKER} -->`;
+const roleFiles: Record<RoleName,string> = { routine:"sol-advisor-routine.toml", high:"sol-advisor-high.toml", advisor:"sol-advisor-advisor.toml" };
+function renderOne(role: RoleName, pref: RolePreference): string {
+  const marker = `# ${MANAGED_MARKER}`;
   const body = instructions(role);
-  if (client === "codex") return `${marker}\nname = "sol_advisor_${role}"\ndescription = "Sol Advisor ${role} role"\nmodel = ${JSON.stringify(pref.model)}\n${pref.effort ? `model_reasoning_effort = ${JSON.stringify(pref.effort)}\n` : ""}${role === "advisor" ? 'sandbox_mode = "read-only"\n' : ""}\ndeveloper_instructions = ${JSON.stringify(body)}\n`;
-  if (client === "cursor") return `---\nname: sol-advisor-${role}\ndescription: Sol Advisor ${role} role\nmodel: ${JSON.stringify(pref.model+(pref.effort ? ` [effort=${pref.effort}]` : ""))}\n${role === "advisor" ? "readonly: true\n" : ""}---\n${marker}\n\n${body}\n`;
-  return `---\nname: sol-advisor-${role}\ndescription: Sol Advisor ${role} role\nmodel: ${JSON.stringify(pref.model)}\n---\n${marker}\n\n${body}\n`;
+  return `${marker}\nname = "sol_advisor_${role}"\ndescription = "Sol Advisor ${role} role"\nmodel = ${JSON.stringify(pref.model)}\n${pref.effort ? `model_reasoning_effort = ${JSON.stringify(pref.effort)}\n` : ""}${role === "advisor" ? 'sandbox_mode = "read-only"\n' : ""}developer_instructions = ${JSON.stringify(body)}\n`;
 }
-export function renderAdapter(preferences: Preferences, workspaceInput: string) {
+export function renderAdapter(preferences: Preferences, workspaceInput: string, options:{registerPreview?:boolean}={}) {
   const errors = validatePreferences(preferences); if (errors.length) throw new Error(errors.join("; "));
   const workspace = safeWorkspace(workspaceInput); if(workspace!==preferences.workspace) throw new Error("workspace does not match the active saved profile");
-  const base = destinationBase(preferences.client, preferences.scope, workspace), names = filenames(preferences.client);
+  const base = destinationBase(preferences.scope, workspace);
   const allowedRoot = preferences.scope === "project" ? workspace : realpathSync(homedir());
   const files = (["routine","high","advisor"] as RoleName[]).map(role => {
-    const path = join(base,names[role]); assertNoSymlinkPath(path,allowedRoot);
-    const content = renderOne(preferences.client,role,preferences.roles[role]);
+    const path = join(base,roleFiles[role]); assertNoSymlinkPath(path,allowedRoot);
+    const content = renderOne(role,preferences.roles[role]);
     return { role,path,content,hash:sha(content) };
   });
   const warnings: string[] = [];
-  if (preferences.client === "cursor") warnings.push("Cursor may fall back when a pinned model is unavailable or restricted. Sol Advisor never chooses that fallback and cannot detect or prevent host fallback.");
-  if (["vscode","github-copilot"].includes(preferences.client)) warnings.push("This client adapter can pin a model only. Reasoning effort and parent cost tier remain client/session constraints, not per-agent guarantees.");
-  if (preferences.client === "kiro") warnings.push("Kiro effort is session/per-model, not a per-agent binding.");
-  if (preferences.client !== "codex") warnings.push("Advisor read-only is a behavioral/client request; OS-enforced isolation is not guaranteed unless the client exposes evidence.");
   const targetState=files.map(f=>({path:f.path,state:existsSync(f.path)?(lstatSync(f.path).isFile()&&!lstatSync(f.path).isSymbolicLink()?sha(readFileSync(f.path)):"unsafe"):"missing"}));
   const planDigest=sha(JSON.stringify({files:files.map(({path,content})=>({path,content})),targetState}));
-  const nonce=randomUUID(), confirmationToken=`INSTALL ${nonce}`, userScopeConfirmationToken=preferences.scope === "user" ? `INSTALL USER ${nonce}` : undefined;
+  const rendered={client:preferences.client,scope:preferences.scope,workspace,files,warnings,planDigest,targetState,afterInstall:"Start a new chat or reload the client so native role discovery sees the adapter files."};
+  if(options.registerPreview===false)return rendered;
+  const nonce=randomUUID(), confirmationToken=`INSTALL ${nonce}`, userScopeConfirmationToken=preferences.scope === "user" ? `INSTALL USER ${nonce}` : undefined, expiresAt=new Date(Date.now()+10*60_000).toISOString();
   previewPlans.set(confirmationToken,{digest:planDigest,expires:Date.now()+10*60_000,userToken:userScopeConfirmationToken,used:false});
-  return { client:preferences.client,scope:preferences.scope,workspace,files,warnings,planDigest,targetState,expiresAt:new Date(Date.now()+10*60_000).toISOString(),confirmationToken,userScopeConfirmationToken,afterInstall:"Start a new chat or reload the client so native role discovery sees the adapter files." };
+  return {...rendered,expiresAt,confirmationToken,userScopeConfirmationToken};
 }
 function loadManifest(): Manifest { if(!existsSync(manifestPath())) return {schemaVersion:1,files:[],updatedAt:new Date().toISOString()}; let x:any; try{x=readJson(manifestPath());}catch(error){throw new Error(`managed-file manifest is corrupt: ${String(error)}`);} if(x?.schemaVersion!==1||!Array.isArray(x.files)) throw new Error("managed-file manifest schema is unsupported"); const paths=new Set<string>(); for(const file of x.files){if(!file||typeof file.profileKey!=="string"||typeof file.path!=="string"||!isAbsolute(file.path)||typeof file.hash!=="string"||!/^[a-f0-9]{64}$/.test(file.hash))throw new Error("managed-file manifest entry is invalid");if(paths.has(file.path))throw new Error(`managed-file manifest contains duplicate path ownership: ${file.path}`);paths.add(file.path);} return x; }
 function requireExactManaged(path:string, hashValue:string) { const text=readFileSync(path,"utf8"); if(!text.includes(MANAGED_MARKER)||sha(text)!==hashValue) throw new Error(`managed file changed; refusing: ${path}`); }
@@ -162,6 +150,21 @@ function journalPath(){return join(dataDir(),"transaction.json");}
 function writeJournal(tx:TransactionJournal){atomicWrite(journalPath(),JSON.stringify(tx,null,2)+"\n");}
 function removeJournal(){if(existsSync(journalPath())){rmSync(journalPath(),{force:true});syncDir(dirname(journalPath()));}}
 function currentHash(path:string){return existsSync(path)&&lstatSync(path).isFile()&&!lstatSync(path).isSymbolicLink()?sha(readFileSync(path)):undefined;}
+type AdapterStatus = "missing" | "current" | "stale" | "conflict";
+function inspectAdapter(preferences: Preferences, workspace: string) {
+  const preview=renderAdapter(preferences,workspace,{registerPreview:false}), owned=loadManifest().files.filter(file=>file.profileKey===preferences.profileKey), ownedByPath=new Map(owned.map(file=>[file.path,file]));
+  let adapterStatus:AdapterStatus="current";
+  const files=preview.files.map(expected=>{
+    const owner=ownedByPath.get(expected.path), actual=currentHash(expected.path), exists=existsSync(expected.path);
+    const state:AdapterStatus=!owner ? (exists ? "conflict" : "missing") : (actual===expected.hash&&owner.hash===expected.hash ? "current" : "stale");
+    if(state==="conflict")adapterStatus="conflict";
+    else if(state==="stale"&&adapterStatus!=="conflict")adapterStatus="stale";
+    else if(state==="missing"&&adapterStatus==="current")adapterStatus="missing";
+    return {role:expected.role,path:expected.path,state};
+  });
+  if(owned.some(file=>!preview.files.some(expected=>expected.path===file.path)))adapterStatus="conflict";
+  return {adapterStatus,files};
+}
 function removeExact(path:string,expected:string,label:string){if(currentHash(path)!==expected)throw new Error(`${label} hash mismatch: ${path}`);rmSync(path,{force:true});syncDir(dirname(path));}
 function restoreManifest(tx:TransactionJournal){
   const actual=currentHash(manifestPath()),originalHash=sha(tx.originalManifest),newHash=sha(tx.newManifest);
@@ -181,7 +184,7 @@ function validateJournal(tx:any):asserts tx is TransactionJournal{
   const top=["schemaVersion","operation","phase","committed","entries","manifestExisted","originalManifest","newManifest","profileKey"];
   if(!tx||keys(tx).some(k=>!top.includes(k))||tx.schemaVersion!==1||!["install","uninstall"].includes(tx.operation)||!["prepared","targets-committed","manifest-committed"].includes(tx.phase)||!Number.isInteger(tx.committed)||!Array.isArray(tx.entries)||tx.committed<0||tx.committed>tx.entries.length||typeof tx.manifestExisted!=="boolean"||typeof tx.originalManifest!=="string"||typeof tx.newManifest!=="string"||typeof tx.profileKey!=="string")throw new Error("transaction journal schema is invalid");
   const state=configState();if(state.status!=="ready"||state.preferences!.profileKey!==tx.profileKey)throw new Error("transaction journal does not match the active profile");
-  const expected=new Set(renderAdapter(state.preferences!,state.preferences!.workspace).files.map(f=>f.path)),backupRoot=join(dataDir(),"backups"),entryKeys=["target","stage","backup","quarantine","newHash","originalHash","wasMissing"];
+  const expected=new Set(renderAdapter(state.preferences!,state.preferences!.workspace,{registerPreview:false}).files.map(f=>f.path)),backupRoot=join(dataDir(),"backups"),entryKeys=["target","stage","backup","quarantine","newHash","originalHash","wasMissing"];
   const journalTargets=new Set(tx.entries.map((e:any)=>e?.target));if(tx.entries.length!==expected.size||journalTargets.size!==expected.size||[...expected].some(path=>!journalTargets.has(path)))throw new Error("transaction journal target set is incomplete or duplicated");
   const validSibling=(candidate:any,target:string,suffix:string)=>{if(typeof candidate!=="string"||dirname(candidate)!==dirname(target))return false;const name=basename(candidate),prefix=`.${basename(target)}.`,tail=`.${suffix}`;return name.startsWith(prefix)&&name.endsWith(tail)&&/^[0-9a-f-]{36}$/.test(name.slice(prefix.length,-tail.length));};
   for(const e of tx.entries){
@@ -201,7 +204,7 @@ function installAdapter(args:any) {
   const state=configState(); if(state.status!=="ready") throw new Error(`setup is ${state.status}; run the parent-chat setup interview first`);
   rejectUnknown(args,["workspace","confirmationToken","userScopeConfirmationToken"],"install");
   for(const key of ["workspace","confirmationToken","userScopeConfirmationToken"]) if(typeof args[key]==="string"&&/[\r\n\0]/.test(args[key])) throw new Error(`${key} contains control characters`);
-  const preview=renderAdapter(state.preferences!,args.workspace), plan=previewPlans.get(args.confirmationToken);
+  const preview=renderAdapter(state.preferences!,args.workspace,{registerPreview:false}), plan=previewPlans.get(args.confirmationToken);
   if(!plan||plan.used||plan.expires<Date.now()||plan.digest!==preview.planDigest) throw new Error("installation requires the exact unexpired one-time preview confirmation token and unchanged target state");
   if(preview.scope==="user"&&args.userScopeConfirmationToken!==plan.userToken) throw new Error("user-scope installation requires the separate exact user-scope token"); plan.used=true;
   const manifest=loadManifest(), previous=new Map(manifest.files.map(f=>[f.path,f]));
@@ -221,7 +224,7 @@ function installAdapter(args:any) {
 }
 function uninstallAdapter(args:any) {
   const state=configState(); if(state.status!=="ready") throw new Error(`setup is ${state.status}`);const manifest=loadManifest(),selected=manifest.files.filter(f=>f.profileKey===state.preferences!.profileKey);if(!selected.length)return {removed:[]};
-  const expected=new Set(renderAdapter(state.preferences!,state.preferences!.workspace).files.map(f=>f.path));if(selected.some(f=>!expected.has(f.path))||selected.length!==expected.size)throw new Error("managed-file manifest destinations do not match the active client allowlist");
+  const expected=new Set(renderAdapter(state.preferences!,state.preferences!.workspace,{registerPreview:false}).files.map(f=>f.path));if(selected.some(f=>!expected.has(f.path))||selected.length!==expected.size)throw new Error("managed-file manifest destinations do not match the active client allowlist");
   const token=`UNINSTALL ${sha(JSON.stringify(selected.map(f=>({path:f.path,hash:f.hash}))))}`;if(args.confirmationToken!==token)return {requiresConfirmation:true,confirmationToken:token,files:selected.map(f=>f.path)};
   for(const f of selected)requireExactManaged(f.path,f.hash);
   const originalManifest=readFileSync(manifestPath(),"utf8"),newManifest=JSON.stringify({schemaVersion:1,files:manifest.files.filter(f=>f.profileKey!==state.preferences!.profileKey),updatedAt:new Date().toISOString()},null,2)+"\n";
@@ -255,7 +258,7 @@ const roleSchema={type:"object",properties:{model:str,effort:str,readonly:{type:
 export const tools = [
   {name:"get_setup_status",description:"Report missing, ready, schema-old, or corrupt setup state",inputSchema:objectSchema()},
   {name:"get_preferences",description:"Read non-secret logical preferences",inputSchema:objectSchema()},
-  {name:"save_preferences",description:"Validate and atomically save interview choices",inputSchema:objectSchema({client:{type:"string",enum:CLIENTS},scope:{type:"string",enum:["project","user"]},workspace:str,orchestrator:{type:"object",properties:{model:{const:"inherit"},recommendation:{type:"object",properties:{model:str,effort:str},required:["model"],additionalProperties:false}},required:["model"],additionalProperties:false},roles:{type:"object",properties:{routine:roleSchema,high:roleSchema,advisor:roleSchema},required:["routine","high","advisor"],additionalProperties:false},appTaskLane:{type:"object",properties:{enabled:{const:true}},required:["enabled"],additionalProperties:false}},["client","scope","workspace","orchestrator","roles"])},
+  {name:"save_preferences",description:"Validate and atomically save interview choices",inputSchema:objectSchema({client:{const:CLIENT},scope:{type:"string",enum:["project","user"]},workspace:str,orchestrator:{type:"object",properties:{model:{const:"inherit"},recommendation:{type:"object",properties:{model:str,effort:str},required:["model"],additionalProperties:false}},required:["model"],additionalProperties:false},roles:{type:"object",properties:{routine:roleSchema,high:roleSchema,advisor:roleSchema},required:["routine","high","advisor"],additionalProperties:false},appTaskLane:{type:"object",properties:{enabled:{const:true}},required:["enabled"],additionalProperties:false}},["client","scope","workspace","orchestrator","roles"])},
   {name:"render_client_adapter",description:"Preview exact allowlisted native adapter paths and contents",inputSchema:objectSchema({workspace:str},["workspace"])},
   {name:"install_client_adapter",description:"Install only the confirmed exact preview",inputSchema:objectSchema({workspace:str,confirmationToken:str,userScopeConfirmationToken:str},["workspace","confirmationToken"])},
   {name:"uninstall_client_adapter",description:"Preview or confirm removal of exact managed files",inputSchema:objectSchema({confirmationToken:str})},
@@ -272,7 +275,7 @@ export async function callTool(name:string,args:any={}) {
   if(name==="render_client_adapter") { const s=configState(); if(s.status!=="ready") throw new Error(`setup is ${s.status}`); return renderAdapter(s.preferences!,args.workspace); }
   if(name==="install_client_adapter") return installAdapter(args);
   if(name==="uninstall_client_adapter") return uninstallAdapter(args);
-  if(name==="validate_configuration") { const s=configState(); return {status:s.status,valid:s.status==="ready",detail:s.detail,...(s.status==="ready"&&args.workspace?{preview:renderAdapter(s.preferences!,args.workspace)}:{})}; }
+  if(name==="validate_configuration") { const s=configState(); return {status:s.status,valid:s.status==="ready",detail:s.detail,...(s.status==="ready"&&args.workspace?{preview:renderAdapter(s.preferences!,args.workspace),...inspectAdapter(s.preferences!,args.workspace)}:{})}; }
   if(name==="reset_configuration") return resetConfiguration(args);
   throw new Error(`unknown tool: ${name}`);
 }

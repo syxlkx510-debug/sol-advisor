@@ -1,12 +1,12 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, rmdirSync, symlinkSync, writeFileSync, existsSync, realpathSync, chmodSync, statSync, renameSync, readdirSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { homedir, tmpdir } from "node:os";
 import { __resetDataPinForTests, __setManifestWriteFaultForTests, callTool, handle, renderAdapter } from "./server";
 import { __setWindowsAclReaderForTests } from "./private-directory";
 
 let root="", data="", workspace="";
-const base=(client="codex",scope="project")=>({client,scope,workspace,orchestrator:{model:"inherit",recommendation:{model:"gpt-5.6-sol",effort:"high"}},roles:{routine:{model:"gpt-5.6-terra",...(client==="codex"||client==="cursor"?{effort:"high"}:{})},high:{model:"gpt-5.6-terra",...(client==="codex"||client==="cursor"?{effort:"high"}:{})},advisor:{model:"gpt-5.6-sol",...(client==="codex"||client==="cursor"?{effort:"high"}:{}),readonly:true}}});
+const base=(scope:"project"|"user"="project")=>({client:"codex",scope,workspace,orchestrator:{model:"inherit",recommendation:{model:"gpt-5.6-sol",effort:"high"}},roles:{routine:{model:"gpt-5.6-luna",effort:"max"},high:{model:"gpt-5.6-terra",effort:"xhigh"},advisor:{model:"gpt-5.6-sol",effort:"xhigh",readonly:true}}});
 const privateWindowsAcl=()=>({owner:"S-1-5-21-test",currentUser:"S-1-5-21-test",rules:[{identity:"S-1-5-21-test",access:"Allow" as const,rights:2032127}]});
 beforeEach(()=>{__resetDataPinForTests();__setWindowsAclReaderForTests(privateWindowsAcl);root=realpathSync(mkdtempSync(join(tmpdir(),"sol-advisor-test-")));data=join(root,"data");workspace=join(root,"work");mkdirSync(data);if(process.platform!=="win32")chmodSync(data,0o700);mkdirSync(workspace);process.env.PLUGIN_DATA=data;});
 afterEach(()=>{__setManifestWriteFaultForTests(undefined);__setWindowsAclReaderForTests();__resetDataPinForTests();delete process.env.PLUGIN_DATA;rmSync(root,{recursive:true,force:true});});
@@ -56,11 +56,10 @@ describe("configuration",()=>{
   await callTool("save_preferences",base()); expect(readFileSync(join(data,"config.json"),"utf8")).not.toContain("SECRET");
   await callTool("save_preferences",base());expect(existsSync(join(data,"backups"))).toBe(true);
  });
- test("capability and fallback violations fail closed",async()=>{
-  await expect(callTool("save_preferences",base("vscode") as any)).resolves.toBeTruthy();
-  const bad:any=base("vscode");bad.roles.routine.effort="max";await expect(callTool("save_preferences",bad)).rejects.toThrow("cannot persist");
-  const blank:any=base();blank.roles.high.model="";await expect(callTool("save_preferences",blank)).rejects.toThrow("exact");
-  await expect(callTool("get_setup_status",{extra:true})).rejects.toThrow("unknown");
+  test("rejects every non-Codex client and invalid values fail closed",async()=>{
+   for(const client of ["cursor","vscode","github-copilot","kiro"])await expect(callTool("save_preferences",{...base(),client})).rejects.toThrow("client must be codex");
+   const blank:any=base();blank.roles.high.model="";await expect(callTool("save_preferences",blank)).rejects.toThrow("exact");
+   await expect(callTool("get_setup_status",{extra:true})).rejects.toThrow("unknown");
  });
  test("keeps the explicit Luna task lane and rejects activation routing",async()=>{
   const saved:any=await callTool("save_preferences",{...base(),appTaskLane:{enabled:true}});
@@ -81,12 +80,6 @@ describe("configuration",()=>{
   expect(routine.content).toContain('model = "gpt-5.6-luna"');
   expect(routine.content).toContain('model_reasoning_effort = "max"');
  });
- test("persists profiles by client scope and workspace",async()=>{
-  await callTool("save_preferences",base("codex","project"));
-  const other=join(root,"other");mkdirSync(other);await callTool("save_preferences",{...base("cursor","project"),workspace:other});
-  const stored=JSON.parse(readFileSync(join(data,"config.json"),"utf8"));expect(Object.keys(stored.profiles)).toHaveLength(2);expect(stored.activeProfile).toContain("cursor:project:");
- });
-
  test("tampered persisted profiles with unknown fields fail closed",async()=>{
   await callTool("save_preferences",base());const path=join(data,"config.json"),stored=JSON.parse(readFileSync(path,"utf8"));stored.profiles[stored.activeProfile].roles.routine.apiToken="MUST_NOT_DISCLOSE";writeFileSync(path,JSON.stringify(stored));
   expect((await callTool("get_setup_status") as any).status).toBe("corrupt");await expect(callTool("get_preferences")).rejects.toThrow("corrupt");
@@ -107,8 +100,24 @@ describe("configuration",()=>{
 });
 
 describe("adapter rendering and lifecycle",()=>{
- test("renders every client and scope with deterministic exact paths",()=>{
-  for(const client of ["codex","cursor","vscode","github-copilot","kiro"]){for(const scope of ["project","user"]){const p:any=base(client,scope);p.workspace=realpathSync(workspace);p.schemaVersion=1;p.profileKey=`${client}:${scope}:${workspace}`;p.fallbackPolicy="fail-closed";p.fallbacks=[];p.appTaskLane={enabled:true,model:"gpt-5.6-luna",effort:"max"};p.createdAt=p.updatedAt="x";p.pluginVersion="0.5.0";const a=renderAdapter(p,workspace);expect(a.files).toHaveLength(3);expect(a.files.map(file=>file.role)).toEqual(["routine","high","advisor"]);expect(a.files.some(file=>file.content.includes("gpt-5.6-luna"))).toBe(false);expect(a.files.every(f=>f.content.includes("sol-advisor-managed:v1"))).toBe(true);if(client==="cursor")expect(a.warnings.join(" ")).toContain("may fall back");expect(renderAdapter(p,workspace).planDigest).toBe(a.planDigest);}}
+ test("renders only the exact three Codex TOML roles",async()=>{
+  const saved:any=await callTool("save_preferences",base());const preview:any=await callTool("render_client_adapter",{workspace});const workspacePath=realpathSync(workspace);
+  expect((renderAdapter(saved.preferences,workspace,{registerPreview:false}) as any).confirmationToken).toBeUndefined();
+  expect(saved.preferences.profileKey).toBe(`codex:project:${workspacePath}`);
+  expect(preview.files.map((file:any)=>({role:file.role,path:file.path,content:file.content}))).toEqual([
+   {role:"routine",path:join(workspacePath,".codex","agents","sol-advisor-routine.toml"),content:'# sol-advisor-managed:v1\nname = "sol_advisor_routine"\ndescription = "Sol Advisor routine role"\nmodel = "gpt-5.6-luna"\nmodel_reasoning_effort = "max"\ndeveloper_instructions = "Implement bounded, well-specified, mechanical work. Preserve the settled architecture, owned files, interfaces, and concurrent edits. Run requested checks and report evidence."\n'},
+   {role:"high",path:join(workspacePath,".codex","agents","sol-advisor-high.toml"),content:'# sol-advisor-managed:v1\nname = "sol_advisor_high"\ndescription = "Sol Advisor high role"\nmodel = "gpt-5.6-terra"\nmodel_reasoning_effort = "xhigh"\ndeveloper_instructions = "Implement complex, security-sensitive, algorithmic, debugging, or wide-blast-radius work within the settled architecture. Surface ambiguity, preserve concurrent edits, and report verification evidence."\n'},
+   {role:"advisor",path:join(workspacePath,".codex","agents","sol-advisor-advisor.toml"),content:'# sol-advisor-managed:v1\nname = "sol_advisor_advisor"\ndescription = "Sol Advisor advisor role"\nmodel = "gpt-5.6-sol"\nmodel_reasoning_effort = "xhigh"\nsandbox_mode = "read-only"\ndeveloper_instructions = "Review the architecture, specification, actual diff, and verification evidence. Remain behaviorally read-only. Return ship, fix-first, or rethink; never implement fixes."\n'},
+  ]);
+  expect(preview.warnings).toEqual([]);
+ });
+ test("validate_configuration reports missing, conflict, current, and stale adapter files",async()=>{
+  await callTool("save_preferences",base());let inspected:any=await callTool("validate_configuration",{workspace});expect(inspected.adapterStatus).toBe("missing");expect(inspected.files.map((file:any)=>file.state)).toEqual(["missing","missing","missing"]);
+  let preview:any=await callTool("render_client_adapter",{workspace});mkdirSync(dirname(preview.files[0].path),{recursive:true});writeFileSync(preview.files[0].path,"USER OWNED");
+  inspected=await callTool("validate_configuration",{workspace});expect(inspected.adapterStatus).toBe("conflict");expect(inspected.files[0]).toEqual({role:"routine",path:preview.files[0].path,state:"conflict"});
+  rmSync(preview.files[0].path);preview=await callTool("render_client_adapter",{workspace});await callTool("install_client_adapter",{workspace,confirmationToken:preview.confirmationToken});
+  inspected=await callTool("validate_configuration",{workspace});expect(inspected.adapterStatus).toBe("current");expect(inspected.files.map((file:any)=>file.state)).toEqual(["current","current","current"]);
+  writeFileSync(preview.files[0].path,`${preview.files[0].content}changed`);inspected=await callTool("validate_configuration",{workspace});expect(inspected.adapterStatus).toBe("stale");expect(inspected.files[0].state).toBe("stale");
  });
  test("requires exact consent, refuses conflict, backs up updates, and uninstalls exact files",async()=>{
   await callTool("save_preferences",base());const preview:any=await callTool("render_client_adapter",{workspace});
@@ -125,7 +134,7 @@ describe("adapter rendering and lifecycle",()=>{
   rmdirSync(join(workspace,".codex","agents"));const preview:any=await callTool("render_client_adapter",{workspace});await callTool("install_client_adapter",{workspace,confirmationToken:preview.confirmationToken});writeFileSync(preview.files[0].path,readFileSync(preview.files[0].path,"utf8")+"changed");const ask:any=await callTool("uninstall_client_adapter",{});await expect(callTool("uninstall_client_adapter",{confirmationToken:ask.confirmationToken})).rejects.toThrow("changed");
  });
  test("user scope requires separate consent",async()=>{
-  await callTool("save_preferences",base("codex","user"));const p:any=await callTool("render_client_adapter",{workspace});await expect(callTool("install_client_adapter",{workspace,confirmationToken:p.confirmationToken})).rejects.toThrow("separate exact user-scope");
+   await callTool("save_preferences",base("user"));const p:any=await callTool("render_client_adapter",{workspace});await expect(callTool("install_client_adapter",{workspace,confirmationToken:p.confirmationToken})).rejects.toThrow("separate exact user-scope");
  });
  test("preview nonce is one-time and reset refuses live installs",async()=>{
   await callTool("save_preferences",base());const p:any=await callTool("render_client_adapter",{workspace});await callTool("install_client_adapter",{workspace,confirmationToken:p.confirmationToken});
@@ -153,14 +162,15 @@ describe("adapter rendering and lifecycle",()=>{
   __setManifestWriteFaultForTests(undefined);
  });
  test("durable journal recovers simulated install and uninstall crashes",async()=>{
-  await callTool("save_preferences",base());let preview:any=await callTool("render_client_adapter",{workspace});__setManifestWriteFaultForTests(point=>{if(point==="install-target-2")throw new Error("__SIMULATED_CRASH__")});await expect(callTool("install_client_adapter",{workspace,confirmationToken:preview.confirmationToken})).rejects.toThrow("SIMULATED_CRASH");expect(existsSync(join(data,"transaction.json"))).toBe(true);__setManifestWriteFaultForTests(undefined);expect((await callTool("get_setup_status") as any).status).toBe("ready");expect(preview.files.every((f:any)=>!existsSync(f.path))).toBe(true);
-  preview=await callTool("render_client_adapter",{workspace});await callTool("install_client_adapter",{workspace,confirmationToken:preview.confirmationToken});const ask:any=await callTool("uninstall_client_adapter",{});__setManifestWriteFaultForTests(point=>{if(point==="uninstall-target-2")throw new Error("__SIMULATED_CRASH__")});await expect(callTool("uninstall_client_adapter",{confirmationToken:ask.confirmationToken})).rejects.toThrow("SIMULATED_CRASH");expect(existsSync(join(data,"transaction.json"))).toBe(true);__setManifestWriteFaultForTests(undefined);expect((await callTool("get_setup_status") as any).status).toBe("ready");for(const f of preview.files)expect(readFileSync(f.path,"utf8")).toBe(f.content);
- });
+   await callTool("save_preferences",base());let preview:any=await callTool("render_client_adapter",{workspace});__setManifestWriteFaultForTests(point=>{if(point==="install-target-2")throw new Error("__SIMULATED_CRASH__")});await expect(callTool("install_client_adapter",{workspace,confirmationToken:preview.confirmationToken})).rejects.toThrow("SIMULATED_CRASH");expect(existsSync(join(data,"transaction.json"))).toBe(true);__setManifestWriteFaultForTests(undefined);expect((await callTool("get_setup_status") as any).status).toBe("ready");expect(preview.files.every((f:any)=>!existsSync(f.path))).toBe(true);
+   preview=await callTool("render_client_adapter",{workspace});await callTool("install_client_adapter",{workspace,confirmationToken:preview.confirmationToken});const ask:any=await callTool("uninstall_client_adapter",{});__setManifestWriteFaultForTests(point=>{if(point==="uninstall-target-2")throw new Error("__SIMULATED_CRASH__")});await expect(callTool("uninstall_client_adapter",{confirmationToken:ask.confirmationToken})).rejects.toThrow("SIMULATED_CRASH");expect(existsSync(join(data,"transaction.json"))).toBe(true);__setManifestWriteFaultForTests(undefined);expect((await callTool("get_setup_status") as any).status).toBe("ready");for(const f of preview.files)expect(readFileSync(f.path,"utf8")).toBe(f.content);
+  });
 
- test("cross-profile shared destination ownership fails closed",async()=>{
-  await callTool("save_preferences",base("vscode"));const first:any=await callTool("render_client_adapter",{workspace});await callTool("install_client_adapter",{workspace,confirmationToken:first.confirmationToken});
-  await callTool("save_preferences",base("github-copilot"));const second:any=await callTool("render_client_adapter",{workspace});await expect(callTool("install_client_adapter",{workspace,confirmationToken:second.confirmationToken})).rejects.toThrow("different profile");
-  const manifest=JSON.parse(readFileSync(join(data,"managed-files.json"),"utf8"));expect(new Set(manifest.files.map((f:any)=>f.path)).size).toBe(manifest.files.length);
+ test("refuses a second Codex profile that claims installed paths",async()=>{
+  await callTool("save_preferences",base());const first:any=await callTool("render_client_adapter",{workspace});await callTool("install_client_adapter",{workspace,confirmationToken:first.confirmationToken});
+  const path=join(data,"config.json"),stored=JSON.parse(readFileSync(path,"utf8")),profileKey=`codex:project:${workspace}:other`;stored.profiles[profileKey]={...stored.profiles[stored.activeProfile],profileKey};stored.activeProfile=profileKey;writeFileSync(path,JSON.stringify(stored));
+  const second:any=await callTool("render_client_adapter",{workspace});await expect(callTool("install_client_adapter",{workspace,confirmationToken:second.confirmationToken})).rejects.toThrow("different profile");
+  const manifest=JSON.parse(readFileSync(join(data,"managed-files.json"),"utf8"));expect(new Set(manifest.files.map((file:any)=>file.path)).size).toBe(manifest.files.length);
  });
 
  test("duplicate manifest path ownership is rejected",async()=>{
