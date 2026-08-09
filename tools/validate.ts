@@ -5,12 +5,12 @@ import { tmpdir } from "node:os";
 
 const root = resolve(import.meta.dir, "..");
 const plugin = join(root, "plugins", "sol-advisor");
-const schemaUrl = "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json";
-const schemaSha256 = "0a4aad95ce337878ad38802ebf0daa3fde76abe3f65400c86bcbb1ec0b3ab883";
-const mcpSchemaSha256 = "6539175bfcdf43085855183e86da40ea94b166547a72b47ae9a0a390516d3acb";
 const pluginNamePattern = /^[a-z0-9](?:[a-z0-9.-]{0,62}[a-z0-9])?$/;
 const skillNamePattern = /^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$/;
-const allowed = new Set(["$schema", "name", "version", "description", "author", "homepage", "repository", "license", "keywords", "extensions"]);
+const codexManifestAllowed = new Set([
+  "name", "version", "description", "author", "homepage", "repository",
+  "license", "keywords", "skills", "mcpServers", "interface",
+]);
 const authorAllowed = new Set(["name", "email", "url"]);
 const errors: string[] = [];
 const fail = (message: string) => errors.push(message);
@@ -42,12 +42,11 @@ function makePrivateDirectory(path: string): void {
   }
 }
 
-function validateManifest(value: any, label: string): boolean {
+function validateCodexManifest(value: any, label: string): boolean {
   const before = errors.length;
   if (!value || Array.isArray(value) || typeof value !== "object") { fail(`${label}: manifest must be an object`); return false; }
-  for (const key of Object.keys(value)) if (!allowed.has(key)) fail(`${label}: unknown top-level field ${key}`);
-  if (value.$schema !== schemaUrl) fail(`${label}: $schema must be ${schemaUrl}`);
-  if (typeof value.name !== "string" || !pluginNamePattern.test(value.name) || value.name.includes("--") || value.name.includes("..")) fail(`${label}: invalid name (must be 1-64 lowercase alphanumeric, period, or hyphen; no -- or ..)`);
+  for (const key of Object.keys(value)) if (!codexManifestAllowed.has(key)) fail(`${label}: unknown top-level field ${key}`);
+  if (value.name !== "sol-advisor") fail(`${label}: name must be sol-advisor`);
   if (value.version !== undefined && (typeof value.version !== "string" || !/^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/.test(value.version))) fail(`${label}: version must be semver`);
   for (const key of ["description", "homepage", "repository", "license"])
     if (value[key] !== undefined && typeof value[key] !== "string") fail(`${label}: ${key} must be a string`);
@@ -59,9 +58,15 @@ function validateManifest(value: any, label: string): boolean {
       if (typeof item !== "string") fail(`${label}: author.${key} must be a string`);
     }
   }
-  if (value.extensions !== undefined) {
-    if (!value.extensions || Array.isArray(value.extensions) || typeof value.extensions !== "object") fail(`${label}: extensions must be an object`);
-    else for (const [key, item] of Object.entries(value.extensions)) if (!item || Array.isArray(item) || typeof item !== "object") fail(`${label}: extension ${key} must be an object`);
+  if (value.skills !== "./skills/") fail(`${label}: skills must be ./skills/`);
+  if (value.mcpServers !== "./.mcp.json") fail(`${label}: mcpServers must be ./.mcp.json`);
+  if (!value.interface || Array.isArray(value.interface) || typeof value.interface !== "object") {
+    fail(`${label}: interface must be an object`);
+  } else {
+    for (const key of ["displayName", "shortDescription", "longDescription", "developerName", "category", "websiteURL"])
+      if (value.interface[key] !== undefined && typeof value.interface[key] !== "string") fail(`${label}: interface.${key} must be a string`);
+    for (const key of ["capabilities", "defaultPrompt"])
+      if (value.interface[key] !== undefined && (!Array.isArray(value.interface[key]) || value.interface[key].some((item: unknown) => typeof item !== "string"))) fail(`${label}: interface.${key} must contain only strings`);
   }
   return errors.length === before;
 }
@@ -144,9 +149,8 @@ function validateTagValue(tag: string, versions: string[], label: string) {
 function validateReleaseTag(tag: string) {
   validateRepository();
   const packageVersion = json(join(root, "package.json")).version;
-  const standardVersion = json(join(plugin, "plugin.json")).version;
   const codexVersion = json(join(plugin, ".codex-plugin", "plugin.json")).version;
-  validateTagValue(tag, [packageVersion, standardVersion, codexVersion], "release tag");
+  validateTagValue(tag, [packageVersion, codexVersion], "release tag");
 }
 
 function expectErrors(label: string, action: () => void) {
@@ -159,8 +163,6 @@ function expectErrors(label: string, action: () => void) {
 function validateFixtures() {
   const dir = join(root, "tools", "fixtures");
   const cases = json(join(dir, "cases.json"));
-  for (const file of cases.positive) if (!validateManifest(json(join(dir, file)), `fixture ${file}`)) fail(`fixture ${file}: expected valid`);
-  for (const file of cases.negative) expectErrors(`fixture ${file}`, () => { validateManifest(json(join(dir, file)), `fixture ${file}`); });
   for (const file of cases.positiveLinks) validateLinks([join(dir, file)], dir);
   for (const file of cases.negativeLinks) expectErrors(`fixture ${file}`, () => { validateLinks([join(dir, file)], dir); });
   validateSkills(join(dir, "skills", "valid"));
@@ -183,31 +185,19 @@ function validateMcp(path: string) {
 
 function validatePackage(packageRoot: string, readme?: string) {
   const files = walk(packageRoot);
-  const standard = json(join(packageRoot, "plugin.json"));
-  const codex = json(join(packageRoot, ".codex-plugin", "plugin.json"));
-  validateManifest(standard, `${relative(root, packageRoot) || "package"}/plugin.json`);
-  if (standard.name !== codex.name) fail("standard/Codex manifest name mismatch");
-  if (standard.version !== codex.version) fail("standard/Codex manifest version mismatch");
+  const manifestPath = join(packageRoot, ".codex-plugin", "plugin.json");
+  if (!existsSync(manifestPath)) fail(".codex-plugin/plugin.json is required");
+  else validateCodexManifest(json(manifestPath), `${relative(root, packageRoot) || "package"}/.codex-plugin/plugin.json`);
   validateSkills(join(packageRoot, "skills"));
   validateLinks([...(readme ? [readme] : []), ...files.filter((file) => file.endsWith(".md"))], packageRoot);
-  if (codex.mcpServers !== "./.mcp.json") fail("Codex manifest mcpServers must be ./.mcp.json");
+  if (existsSync(join(packageRoot, "plugin.json"))) fail("portable root plugin.json must not be shipped");
+  if (existsSync(join(packageRoot, "mcp.json"))) fail("portable root mcp.json must not be shipped");
   const mcpPath = join(packageRoot, ".mcp.json");
   if (!existsSync(mcpPath)) fail(".mcp.json is required"); else validateMcp(mcpPath);
-  if (existsSync(join(packageRoot, "mcp.json"))) fail("legacy mcp.json must not be shipped");
-  if (!existsSync(join(packageRoot,"mcp","server.ts"))) fail("MCP runtime server is required");
+  if (!existsSync(join(packageRoot, "mcp", "server.ts"))) fail("MCP runtime server is required");
 }
 
 function validateRepository() {
-  const schemaPath = join(root, "tools", "schema", "agent-plugin-v1.schema.json");
-  const digest = createHash("sha256").update(canonicalText(schemaPath)).digest("hex");
-  if (digest !== schemaSha256) fail(`vendored schema digest mismatch: ${digest}`);
-  const pin = readFileSync(join(root, "tools", "schema", "agent-plugin-v1.schema.sha256"), "utf8").trim();
-  if (pin !== `${schemaSha256}  agent-plugin-v1.schema.json`) fail("schema checksum file mismatch");
-  const mcpSchemaPath=join(root,"tools","schema","agent-plugin-v1-mcp.schema.json");
-  const mcpDigest=createHash("sha256").update(canonicalText(mcpSchemaPath)).digest("hex");
-  if(mcpDigest!==mcpSchemaSha256) fail(`vendored MCP schema digest mismatch: ${mcpDigest}`);
-  const mcpPin=readFileSync(join(root,"tools","schema","agent-plugin-v1-mcp.schema.sha256"),"utf8").trim();
-  if(mcpPin!==`${mcpSchemaSha256}  agent-plugin-v1-mcp.schema.json`) fail("MCP schema checksum file mismatch");
   validatePackage(plugin, join(root, "README.md"));
   validateFixtures();
 }
@@ -222,7 +212,7 @@ async function run(command: string, args: string[], cwd = root): Promise<string>
 async function release(checkOnly: boolean) {
   validateRepository();
   if (errors.length) return;
-  const version = json(join(plugin, "plugin.json")).version;
+  const version = json(join(plugin, ".codex-plugin", "plugin.json")).version;
   const dist = join(root, "dist");
   mkdirSync(dist, { recursive: true });
   const artifact = join(dist, `sol-advisor-${version}.tar.gz`);
@@ -238,7 +228,7 @@ async function release(checkOnly: boolean) {
       if (isAbsolute(clean) || clean === ".." || clean.startsWith(`..${sep}`)) fail(`artifact path escapes root: ${entry}`);
       if (clean.startsWith("plugins/sol-advisor/")) fail(`artifact is not flattened: ${entry}`);
     }
-    if (!listing.some((x) => x.replace(/^\.\//, "") === "plugin.json")) fail("artifact lacks root plugin.json");
+    if (!listing.some((x) => x.replace(/^\.\//, "") === ".codex-plugin/plugin.json")) fail("artifact lacks .codex-plugin/plugin.json");
     const verbose = await run("tar", ["-tvzf", artifact]);
     for (const line of verbose.split("\n").filter(Boolean)) if (/^[lh]/.test(line)) fail(`artifact contains link entry: ${line}`);
     if (!errors.length) {

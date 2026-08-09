@@ -1,15 +1,4 @@
 {
-  "positive": [
-    "positive-manifest.json",
-    "positive-dotted-name.json"
-  ],
-  "negative": [
-    "negative-unknown-field.json",
-    "negative-author-field.json",
-    "negative-double-hyphen-name.json",
-    "negative-double-period-name.json",
-    "negative-long-name.json"
-  ],
   "positiveLinks": [
     "positive-links.md"
   ],

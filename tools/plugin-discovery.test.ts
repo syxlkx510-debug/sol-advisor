@@ -109,19 +109,24 @@ function inspectFixture(
   }
 }
 
-describe("Codex MCP discovery", () => {
-  test("declares the conventional companion file", () => {
+describe("Codex-only plugin discovery", () => {
+  test("ships one Codex manifest and one MCP companion", () => {
+    expect(manifest.name).toBe("sol-advisor");
+    expect(manifest.skills).toBe("./skills/");
     expect(manifest.mcpServers).toBe("./.mcp.json");
     expect(existsSync(join(pluginRoot, ".mcp.json"))).toBe(true);
-  });
-
-  test("does not ship an undiscoverable legacy filename", () => {
+    expect(existsSync(join(pluginRoot, "plugin.json"))).toBe(false);
     expect(existsSync(join(pluginRoot, "mcp.json"))).toBe(false);
   });
 
-  test("uses the Codex companion shape", () => {
-    expect(companion.$schema).toBeUndefined();
+  test("uses the closed Codex MCP companion shape", () => {
     expect(Object.keys(companion)).toEqual(["mcpServers"]);
+    expect(companion.mcpServers["sol-advisor"]).toEqual({
+      type: "stdio",
+      command: "bun",
+      args: ["${PLUGIN_ROOT}/mcp/server.ts"],
+      cwd: "${PLUGIN_ROOT}",
+    });
   });
 });
 
