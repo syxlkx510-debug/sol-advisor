@@ -1,7 +1,7 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "sol-advisor",
-  "version": "0.5.0+codex.20260808180425",
+  "version": "0.5.0+codex.20260809135432",
   "description": "Configurable cross-client architect orchestration with lazy setup, exact user-selected native roles, safe adapter installation, and a separate explicit Codex Luna app-task lane.",
   "author": {
     "name": "Daniel McAteer",

@@ -260,6 +260,21 @@ zero_id=22222222-2222-7222-8222-222222222222
 if sh "$runtime_inspector" --sessions-dir "$runtime_sessions" "$zero_id" >/dev/null 2>&1; then fail "runtime inspector accepted zero matches"; fi
 pass "runtime inspector Terra/High routing and safe refusal"
 
+nested_runtime_id=33333333-3333-7333-8333-333333333333
+nested_runtime_rollout=$runtime_day/rollout-2026-08-02T00-01-00-$nested_runtime_id.jsonl
+printf '%s\n' \
+  "{\"type\":\"session_meta\",\"payload\":{\"id\":\"$nested_runtime_id\",\"parent_thread_id\":\"00000000-0000-7000-8000-000000000000\",\"agent_role\":\"sol_advisor_sol_reviewer\",\"agent_path\":\"/root/fixture\",\"model_provider\":\"openai\",\"cwd\":\"/fixture\"}}" \
+  '{"type":"turn_context","payload":{"model":"gpt-5.6-sol","sandbox_policy":{"type":"workspace-write"},"permission_profile":{"type":"managed"},"cwd":"/fixture","collaboration_mode":{"mode":"default","settings":{"model":"gpt-5.6-sol","reasoning_effort":"high","developer_instructions":null}}}}' \
+  > "$nested_runtime_rollout"
+nested_runtime_output=$(sh "$runtime_inspector" --sessions-dir "$runtime_sessions" "$nested_runtime_id")
+printf '%s\n' "$nested_runtime_output" | jq -e --arg id "$nested_runtime_id" '
+  .thread_id == $id and .agent_role == "sol_advisor_sol_reviewer"
+  and .model == "gpt-5.6-sol" and .effort == "high"
+  and .sandbox_policy_type == "workspace-write"
+  and .permission_profile_type == "managed"
+' >/dev/null || fail "runtime inspector returned wrong nested-effort evidence"
+pass "runtime inspector accepts current Codex nested reasoning-effort metadata"
+
 for document in "$skill" "$contracts"; do
   grep -Fq 'agent_type: sol_advisor_terra_implementer' "$document" || fail "missing Terra spawn in $document"
   grep -Fq 'agent_type: sol_advisor_sol_reviewer' "$document" || fail "missing Sol spawn in $document"

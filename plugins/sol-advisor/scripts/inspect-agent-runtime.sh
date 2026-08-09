@@ -100,6 +100,30 @@ if ! jq -ce -s --arg expected_thread_id "$thread_id" '
   def string_or_null:
     if type == "string" then . else null end;
 
+  def nested_effort_present:
+    if (.collaboration_mode? | type) != "object" then
+      false
+    elif (.collaboration_mode | has("settings") | not) then
+      false
+    elif (.collaboration_mode.settings | type) != "object" then
+      false
+    else
+      (.collaboration_mode.settings | has("reasoning_effort"))
+    end;
+
+  def effort_or_null:
+    has("effort") as $legacy_present |
+    nested_effort_present as $nested_present |
+    (if $legacy_present then .effort else null end | string_or_null) as $legacy |
+    (if $nested_present then .collaboration_mode.settings.reasoning_effort else null end | string_or_null) as $nested |
+    if ($legacy_present and $legacy == null) or ($nested_present and $nested == null) then
+      error("invalid effort encoding")
+    elif $legacy != null and $nested != null and $legacy != $nested then
+      error("conflicting effort encodings")
+    else
+      ($legacy // $nested)
+    end;
+
   [ .[] | select(.type == "session_meta") | .payload ] as $sessions |
   [ .[] | select(.type == "turn_context") | .payload ] as $turns |
   if ($sessions | length) != 1 then
@@ -114,7 +138,7 @@ if ! jq -ce -s --arg expected_thread_id "$thread_id" '
     ($session.agent_path? | string_or_null) as $agent_path |
     ($session.model_provider? | string_or_null) as $model_provider |
     [ $turns[] | (.model? | string_or_null) ] as $models |
-    [ $turns[] | (.effort? | string_or_null) ] as $efforts |
+    [ $turns[] | effort_or_null ] as $efforts |
     [ $turns[] | ((.sandbox_policy? // {}) | .type? | string_or_null) ] as $sandbox_types |
     [ $turns[] | ((.permission_profile? // {}) | .type? | string_or_null) ] as $permission_types |
     [ $turns[] | (.cwd? | string_or_null) ] as $cwds |
