@@ -1,6 +1,17 @@
-import { lstatSync, readFileSync, readdirSync, type Dirent } from "node:fs";
+import {
+  closeSync,
+  fstatSync,
+  lstatSync,
+  openSync,
+  readSync,
+  readdirSync,
+  realpathSync,
+  statSync,
+  type Dirent,
+  type Stats,
+} from "node:fs";
 import { homedir } from "node:os";
-import { join, resolve } from "node:path";
+import { isAbsolute, join, relative, resolve, sep } from "node:path";
 
 export type RuntimeEvidence = {
   thread_id: string;
@@ -15,11 +26,46 @@ export type RuntimeEvidence = {
   cwd: string;
 };
 
+export const DEFAULT_RUNTIME_INSPECTION_LIMITS = {
+  maxDirectories: 4_096,
+  maxEntries: 100_000,
+  maxMatchedRolloutBytes: 8 * 1024 * 1024,
+  maxLineBytes: 1024 * 1024,
+  maxRecords: 10_000,
+} as const;
+
+export type RuntimeInspectionLimits = {
+  [Key in keyof typeof DEFAULT_RUNTIME_INSPECTION_LIMITS]: number;
+};
+
+export type RuntimeInspectionOptions = {
+  limits?: Partial<RuntimeInspectionLimits>;
+  /** Test-only hook. It is never reachable from the CLI. */
+  testHooks?: {
+    beforeOpen?: (candidatePath: string) => void;
+  };
+};
+
 const LOWERCASE_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const INVALID_ROLLOUT =
   "rollout is missing, ambiguous, invalid, or inconsistent required routing metadata.";
+const DIRECTORY_LIMIT_EXCEEDED =
+  "session directory traversal exceeded the directory limit.";
+const ENTRY_LIMIT_EXCEEDED =
+  "session directory traversal exceeded the entry limit.";
+const ROLLOUT_TOO_LARGE = "matched rollout exceeds the maximum size.";
+const LINE_TOO_LARGE = "rollout contains a line exceeding the maximum size.";
+const RECORD_LIMIT_EXCEEDED = "rollout exceeds the record limit.";
+const CANDIDATE_CHANGED = "matched rollout changed during inspection.";
 
 class RuntimeInspectionError extends Error {}
+
+type FileIdentity = Pick<Stats, "dev" | "ino" | "size">;
+
+type ParsedRollout = {
+  sessions: Record<string, unknown>[];
+  turns: Record<string, unknown>[];
+};
 
 function fail(message: string): never {
   throw new RuntimeInspectionError(message);
@@ -81,38 +127,88 @@ function requireOneValue(values: string[]): string {
   return values[0]!;
 }
 
-function parseJsonl(rolloutFile: string): unknown[] {
-  let contents: string;
-  try {
-    contents = readFileSync(rolloutFile, "utf8");
-  } catch {
-    fail("matched rollout is unavailable.");
-  }
-
-  const records: unknown[] = [];
-  for (const line of contents.split(/\r?\n/)) {
-    if (line.trim() === "") continue;
-    try {
-      records.push(JSON.parse(line));
-    } catch {
-      invalidRollout();
+function resolveLimits(
+  overrides: Partial<RuntimeInspectionLimits> | undefined,
+): RuntimeInspectionLimits {
+  const limits: RuntimeInspectionLimits = {
+    ...DEFAULT_RUNTIME_INSPECTION_LIMITS,
+    ...overrides,
+  };
+  for (const value of Object.values(limits)) {
+    if (!Number.isSafeInteger(value) || value < 1) {
+      fail("runtime inspection limits are invalid.");
     }
   }
-  return records;
+  return limits;
 }
 
-function eventPayload(record: unknown): Record<string, unknown> {
-  if (!isRecord(record) || !isRecord(record.payload)) invalidRollout();
-  return record.payload;
+function isWithinRoot(canonicalRoot: string, canonicalPath: string): boolean {
+  const pathFromRoot = relative(canonicalRoot, canonicalPath);
+  return (
+    pathFromRoot === "" ||
+    (!isAbsolute(pathFromRoot) &&
+      pathFromRoot !== ".." &&
+      !pathFromRoot.startsWith(`..${sep}`))
+  );
 }
 
-function findRolloutFiles(sessionsDir: string, threadId: string): string[] {
+function resolveSessionsRoot(sessionsDir: string): string {
+  try {
+    const canonicalRoot = realpathSync(resolve(sessionsDir));
+    if (!statSync(canonicalRoot).isDirectory()) {
+      fail("sessions directory is unavailable.");
+    }
+    return canonicalRoot;
+  } catch (error) {
+    if (error instanceof RuntimeInspectionError) throw error;
+    fail("sessions directory is unavailable.");
+  }
+}
+
+function canonicalDirectory(
+  directory: string,
+  canonicalRoot: string,
+): string | null {
+  try {
+    const directoryLstat = lstatSync(directory);
+    if (directoryLstat.isSymbolicLink()) return null;
+    if (!directoryLstat.isDirectory()) {
+      fail("could not enumerate rollout filenames under the sessions directory.");
+    }
+    const canonical = realpathSync(directory);
+    if (!isWithinRoot(canonicalRoot, canonical) || !statSync(canonical).isDirectory()) {
+      fail("could not enumerate rollout filenames under the sessions directory.");
+    }
+    return canonical;
+  } catch (error) {
+    if (error instanceof RuntimeInspectionError) throw error;
+    fail("could not enumerate rollout filenames under the sessions directory.");
+  }
+}
+
+function findRolloutFiles(
+  canonicalRoot: string,
+  threadId: string,
+  limits: RuntimeInspectionLimits,
+): string[] {
   const suffix = `-${threadId}.jsonl`;
-  const stack = [sessionsDir];
+  const stack = [canonicalRoot];
   const matches: string[] = [];
+  let directoriesVisited = 0;
+  let entriesVisited = 0;
 
+  /*
+   * Node has no cross-platform directory-handle API that can pin a tree against
+   * hostile same-user replacement while it is being enumerated. Each directory is
+   * therefore re-canonicalized and containment-checked before reading; observable
+   * changes fail closed, and the final rollout is read through a verified handle.
+   */
   while (stack.length > 0) {
-    const directory = stack.pop()!;
+    const requestedDirectory = stack.pop()!;
+    const directory = canonicalDirectory(requestedDirectory, canonicalRoot);
+    if (directory === null) continue;
+    if (++directoriesVisited > limits.maxDirectories) fail(DIRECTORY_LIMIT_EXCEEDED);
+
     let entries: Dirent[];
     try {
       entries = readdirSync(directory, { withFileTypes: true });
@@ -121,7 +217,9 @@ function findRolloutFiles(sessionsDir: string, threadId: string): string[] {
     }
 
     for (const entry of entries) {
+      if (++entriesVisited > limits.maxEntries) fail(ENTRY_LIMIT_EXCEEDED);
       if (entry.isSymbolicLink()) continue;
+
       const path = join(directory, entry.name);
       if (entry.isDirectory()) {
         stack.push(path);
@@ -139,17 +237,118 @@ function findRolloutFiles(sessionsDir: string, threadId: string): string[] {
   return matches;
 }
 
-function resolveSessionsDir(sessionsDir: string): string {
-  const resolved = resolve(sessionsDir);
+function sameFileIdentity(first: FileIdentity, second: FileIdentity): boolean {
+  return (
+    first.dev === second.dev &&
+    first.ino === second.ino &&
+    first.size === second.size
+  );
+}
+
+function verifiedCandidateBuffer(
+  candidate: string,
+  canonicalRoot: string,
+  limits: RuntimeInspectionLimits,
+  testHooks: RuntimeInspectionOptions["testHooks"],
+): Buffer {
+  let before: Stats;
+  let canonicalBefore: string;
   try {
-    if (!lstatSync(resolved).isDirectory()) {
-      fail("sessions directory is unavailable.");
-    }
+    before = lstatSync(candidate);
+    if (!before.isFile() || before.isSymbolicLink()) fail(CANDIDATE_CHANGED);
+    canonicalBefore = realpathSync(candidate);
+    if (!isWithinRoot(canonicalRoot, canonicalBefore)) fail(CANDIDATE_CHANGED);
   } catch (error) {
     if (error instanceof RuntimeInspectionError) throw error;
-    fail("sessions directory is unavailable.");
+    fail(CANDIDATE_CHANGED);
   }
-  return resolved;
+
+  if (!Number.isSafeInteger(before.size) || before.size > limits.maxMatchedRolloutBytes) {
+    fail(ROLLOUT_TOO_LARGE);
+  }
+
+  testHooks?.beforeOpen?.(candidate);
+
+  let descriptor: number | undefined;
+  try {
+    descriptor = openSync(candidate, "r");
+    const opened = fstatSync(descriptor);
+    if (!opened.isFile() || !sameFileIdentity(before, opened)) fail(CANDIDATE_CHANGED);
+
+    const afterPath = lstatSync(candidate);
+    if (!afterPath.isFile() || afterPath.isSymbolicLink() || !sameFileIdentity(before, afterPath)) {
+      fail(CANDIDATE_CHANGED);
+    }
+    const canonicalAfter = realpathSync(candidate);
+    if (
+      canonicalAfter !== canonicalBefore ||
+      !isWithinRoot(canonicalRoot, canonicalAfter)
+    ) {
+      fail(CANDIDATE_CHANGED);
+    }
+
+    const contents = Buffer.alloc(opened.size);
+    let offset = 0;
+    while (offset < contents.length) {
+      const read = readSync(descriptor, contents, offset, contents.length - offset, offset);
+      if (read === 0) fail(CANDIDATE_CHANGED);
+      offset += read;
+    }
+    return contents;
+  } catch (error) {
+    if (error instanceof RuntimeInspectionError) throw error;
+    fail(CANDIDATE_CHANGED);
+  } finally {
+    if (descriptor !== undefined) {
+      try {
+        closeSync(descriptor);
+      } catch {
+        // The read result is never used after a close failure.
+      }
+    }
+  }
+}
+
+function eventPayload(record: unknown): Record<string, unknown> {
+  if (!isRecord(record) || !isRecord(record.payload)) invalidRollout();
+  return record.payload;
+}
+
+function parseJsonl(
+  contents: Buffer,
+  limits: RuntimeInspectionLimits,
+): ParsedRollout {
+  const sessions: Record<string, unknown>[] = [];
+  const turns: Record<string, unknown>[] = [];
+  let records = 0;
+  let lineStart = 0;
+
+  for (let index = 0; index <= contents.length; index += 1) {
+    if (index !== contents.length && contents[index] !== 0x0a) continue;
+
+    const lineLength = index - lineStart;
+    if (lineLength > limits.maxLineBytes) fail(LINE_TOO_LARGE);
+    const line = contents.subarray(lineStart, index).toString("utf8");
+    lineStart = index + 1;
+    if (line.trim() === "") continue;
+
+    if (++records > limits.maxRecords) fail(RECORD_LIMIT_EXCEEDED);
+    let record: unknown;
+    try {
+      record = JSON.parse(line);
+    } catch {
+      invalidRollout();
+    }
+
+    if (!isRecord(record)) continue;
+    if (record.type === "session_meta") {
+      sessions.push(eventPayload(record));
+    } else if (record.type === "turn_context") {
+      turns.push(eventPayload(record));
+    }
+  }
+
+  return { sessions, turns };
 }
 
 function validateThreadId(threadId: string): void {
@@ -161,10 +360,12 @@ function validateThreadId(threadId: string): void {
 export function inspectRuntime(
   sessionsDir: string,
   threadId: string,
+  options: RuntimeInspectionOptions = {},
 ): RuntimeEvidence {
   validateThreadId(threadId);
-  const resolvedSessionsDir = resolveSessionsDir(sessionsDir);
-  const matches = findRolloutFiles(resolvedSessionsDir, threadId);
+  const limits = resolveLimits(options.limits);
+  const canonicalRoot = resolveSessionsRoot(sessionsDir);
+  const matches = findRolloutFiles(canonicalRoot, threadId, limits);
   if (matches.length === 0) {
     fail("no rollout filename matched the requested thread id.");
   }
@@ -172,16 +373,13 @@ export function inspectRuntime(
     fail("multiple rollout filenames matched the requested thread id.");
   }
 
-  const records = parseJsonl(matches[0]!);
-  const sessions = records.filter(
-    (record) => isRecord(record) && record.type === "session_meta",
-  );
-  const turns = records.filter(
-    (record) => isRecord(record) && record.type === "turn_context",
+  const { sessions, turns } = parseJsonl(
+    verifiedCandidateBuffer(matches[0]!, canonicalRoot, limits, options.testHooks),
+    limits,
   );
   if (sessions.length !== 1 || turns.length === 0) invalidRollout();
 
-  const session = eventPayload(sessions[0]);
+  const session = sessions[0]!;
   const sessionThreadId = requiredString(session.id);
   if (sessionThreadId !== threadId) invalidRollout();
 
@@ -195,8 +393,7 @@ export function inspectRuntime(
   const sandboxPolicyTypes: string[] = [];
   const permissionProfileTypes: string[] = [];
   const cwds: string[] = [];
-  for (const turn of turns) {
-    const payload = eventPayload(turn);
+  for (const payload of turns) {
     models.push(requiredString(payload.model));
     efforts.push(effortFromTurn(payload));
     sandboxPolicyTypes.push(requiredNestedType(payload, "sandbox_policy"));

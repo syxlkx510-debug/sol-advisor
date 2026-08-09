@@ -3,12 +3,17 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  renameSync,
   rmSync,
+  symlinkSync,
+  truncateSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 import { describe, expect, test } from "bun:test";
+import { inspectRuntime } from "../plugins/sol-advisor/scripts/inspect-agent-runtime.ts";
 
 const pluginRoot = resolve(import.meta.dir, "..", "plugins", "sol-advisor");
 const manifest = JSON.parse(
@@ -65,19 +70,34 @@ function writeRollout(
   );
 }
 
-function inspectFixture(
-  threadId: string,
-  setup: (day: string) => void,
-) {
-  const root = mkdtempSync(join(tmpdir(), "sol-advisor-runtime-test-"));
+function withFixture<T>(callback: (root: string, day: string) => T): T {
+  const container = mkdtempSync(join(tmpdir(), "sol-advisor-runtime-test-"));
+  const root = join(container, "sessions");
   try {
     const day = join(root, "2026", "08", "09");
     mkdirSync(day, { recursive: true });
+    return callback(root, day);
+  } finally {
+    rmSync(container, { recursive: true, force: true });
+  }
+}
+
+function inspectFixture(threadId: string, setup: (day: string) => void) {
+  return withFixture((root, day) => {
     setup(day);
     return runInspector(["--sessions-dir", root, threadId]);
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
+  });
+}
+
+function inspectRuntimeFixture(
+  threadId: string,
+  setup: (root: string, day: string) => void,
+  options?: Parameters<typeof inspectRuntime>[2],
+) {
+  return withFixture((root, day) => {
+    setup(root, day);
+    return inspectRuntime(root, threadId, options);
+  });
 }
 
 function completeRollout(threadId: string, turns = [turnContext()]) {
@@ -88,6 +108,10 @@ function expectRuntimeFailure(result: ReturnType<typeof Bun.spawnSync>) {
   expect(result.exitCode).toBe(1);
   expect(result.stdout.toString()).toBe("");
   expect(result.stderr.toString()).toMatch(/^ERROR: .+\n$/);
+}
+
+function createDirectoryLink(target: string, link: string): void {
+  symlinkSync(target, link, process.platform === "win32" ? "junction" : "dir");
 }
 
 describe("Codex-only plugin discovery", () => {
@@ -181,11 +205,16 @@ describe("native runtime inspector", () => {
   test("rejects multiple matching rollout filenames before parsing", () => {
     const threadId = "77777777-7777-7777-8777-777777777777";
     const result = inspectFixture(threadId, (day) => {
-      writeRollout(day, `rollout-first-${threadId}.jsonl`, completeRollout(threadId));
+      writeFileSync(
+        join(day, `rollout-first-${threadId}.jsonl`),
+        "DO_NOT_LEAK_DUPLICATE_CONTENT\n",
+        "utf8",
+      );
       writeRollout(day, `rollout-second-${threadId}.jsonl`, completeRollout(threadId));
     });
     expectRuntimeFailure(result);
     expect(result.stderr.toString()).toContain("multiple rollout filenames matched");
+    expect(result.stderr.toString()).not.toContain("DO_NOT_LEAK_DUPLICATE_CONTENT");
   });
 
   for (const invalidThreadId of [
@@ -276,11 +305,137 @@ describe("native runtime inspector", () => {
     const result = inspectFixture(threadId, (day) => {
       writeFileSync(
         join(day, `rollout-2026-08-09T00-00-00-${threadId}.jsonl`),
-        `${JSON.stringify(sessionMeta(threadId))}\nnot-json\n${JSON.stringify(turnContext())}\n`,
+        `${JSON.stringify(sessionMeta(threadId))}\nDO_NOT_LEAK_MALFORMED_CONTENT\n${JSON.stringify(turnContext())}\n`,
         "utf8",
       );
     });
     expectRuntimeFailure(result);
+    expect(result.stderr.toString()).not.toContain("DO_NOT_LEAK_MALFORMED_CONTENT");
+  });
+
+  test("accepts a linked sessions root with the same result as its target", () => {
+    const threadId = "12121212-1212-7121-8121-121212121212";
+    withFixture((root, day) => {
+      writeRollout(day, `rollout-2026-08-09T00-00-00-${threadId}.jsonl`, completeRollout(threadId));
+      const linkedRoot = join(root, "linked-sessions-root");
+      createDirectoryLink(root, linkedRoot);
+
+      const direct = runInspector(["--sessions-dir", root, threadId]);
+      const linked = runInspector(["--sessions-dir", linkedRoot, threadId]);
+      expect(direct.exitCode).toBe(0);
+      expect(linked.exitCode).toBe(0);
+      expect(linked.stderr.toString()).toBe("");
+      expect(linked.stdout.toString()).toBe(direct.stdout.toString());
+    });
+  });
+
+  test("does not traverse an outside subtree linked from sessions", () => {
+    const threadId = "13131313-1313-7131-8131-131313131313";
+    withFixture((root, day) => {
+      writeRollout(day, `rollout-2026-08-09T00-00-00-${threadId}.jsonl`, completeRollout(threadId));
+      const outside = join(dirname(root), "outside");
+      mkdirSync(outside, { recursive: true });
+      writeFileSync(
+        join(outside, `rollout-outside-${threadId}.jsonl`),
+        "DO_NOT_LEAK_OUTSIDE_CONTENT\n",
+        "utf8",
+      );
+      createDirectoryLink(outside, join(root, "outside-link"));
+
+      const result = runInspector(["--sessions-dir", root, threadId]);
+      expect(result.exitCode).toBe(0);
+      expect(result.stderr.toString()).toBe("");
+      expect(result.stdout.toString()).not.toContain("DO_NOT_LEAK_OUTSIDE_CONTENT");
+    });
+  });
+
+  test("fails closed when the candidate path is replaced before it opens", () => {
+    const threadId = "14141414-1414-7141-8141-141414141414";
+    expect(() => inspectRuntimeFixture(
+      threadId,
+      (_root, day) => {
+        writeRollout(day, `rollout-2026-08-09T00-00-00-${threadId}.jsonl`, completeRollout(threadId));
+      },
+      {
+        testHooks: {
+          beforeOpen(candidate) {
+            renameSync(candidate, `${candidate}.original`);
+            writeFileSync(candidate, "DO_NOT_LEAK_REPLACED_CONTENT\n", "utf8");
+          },
+        },
+      },
+    )).toThrow("matched rollout changed during inspection.");
+  });
+
+  for (const kind of ["sparse", "filled"] as const) {
+    test(`rejects an oversized ${kind} rollout before parsing`, () => {
+      const threadId = "15151515-1515-7151-8151-151515151515";
+      expect(() => inspectRuntimeFixture(
+        threadId,
+        (_root, day) => {
+          const rollout = join(day, `rollout-2026-08-09T00-00-00-${threadId}.jsonl`);
+          if (kind === "sparse") {
+            writeFileSync(rollout, "{}", "utf8");
+            truncateSync(rollout, 65);
+          } else {
+            writeFileSync(rollout, "x".repeat(65), "utf8");
+          }
+        },
+        { limits: { maxMatchedRolloutBytes: 64 } },
+      )).toThrow("matched rollout exceeds the maximum size.");
+    });
+  }
+
+  test("rejects an overlong rollout line before parsing", () => {
+    const threadId = "16161616-1616-7161-8161-161616161616";
+    expect(() => inspectRuntimeFixture(
+      threadId,
+      (_root, day) => {
+        writeFileSync(
+          join(day, `rollout-2026-08-09T00-00-00-${threadId}.jsonl`),
+          "x".repeat(65),
+          "utf8",
+        );
+      },
+      { limits: { maxLineBytes: 64 } },
+    )).toThrow("rollout contains a line exceeding the maximum size.");
+  });
+
+  test("rejects rollout record-count overflow", () => {
+    const threadId = "17171717-1717-7171-8171-171717171717";
+    expect(() => inspectRuntimeFixture(
+      threadId,
+      (_root, day) => {
+        writeRollout(day, `rollout-2026-08-09T00-00-00-${threadId}.jsonl`, [
+          sessionMeta(threadId),
+          turnContext(),
+          turnContext(),
+        ]);
+      },
+      { limits: { maxRecords: 2 } },
+    )).toThrow("rollout exceeds the record limit.");
+  });
+
+  test("rejects session traversal that exceeds the directory limit", () => {
+    const threadId = "18181818-1818-7181-8181-181818181818";
+    expect(() => inspectRuntimeFixture(
+      threadId,
+      (_root, day) => {
+        writeRollout(day, `rollout-2026-08-09T00-00-00-${threadId}.jsonl`, completeRollout(threadId));
+      },
+      { limits: { maxDirectories: 1 } },
+    )).toThrow("session directory traversal exceeded the directory limit.");
+  });
+
+  test("importing the runtime inspector does not execute its CLI", () => {
+    const result = Bun.spawnSync([
+      process.execPath,
+      "-e",
+      `import ${JSON.stringify(pathToFileURL(runtimeInspector).href)};`,
+    ]);
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout.toString()).toBe("");
+    expect(result.stderr.toString()).toBe("");
   });
 
   test("accepts exactly THREAD_ID using the CODEX_HOME sessions default", () => {
