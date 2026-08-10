@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, realpathSync, chmodSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, normalize, relative, resolve, sep } from "node:path";
 import { tmpdir } from "node:os";
+import { baseVersion, parseCodexVersion } from "./version";
 
 const root = resolve(import.meta.dir, "..");
 const plugin = join(root, "plugins", "sol-advisor");
@@ -47,7 +48,10 @@ function validateCodexManifest(value: any, label: string): boolean {
   if (!value || Array.isArray(value) || typeof value !== "object") { fail(`${label}: manifest must be an object`); return false; }
   for (const key of Object.keys(value)) if (!codexManifestAllowed.has(key)) fail(`${label}: unknown top-level field ${key}`);
   if (value.name !== "sol-advisor") fail(`${label}: name must be sol-advisor`);
-  if (value.version !== undefined && (typeof value.version !== "string" || !/^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/.test(value.version))) fail(`${label}: version must be semver`);
+  if (value.version !== undefined) {
+    if (typeof value.version !== "string") fail(`${label}: version must be a string`);
+    else try { parseCodexVersion(value.version); } catch { fail(`${label}: version must be a Codex plugin version`); }
+  }
   for (const key of ["description", "homepage", "repository", "license"])
     if (value[key] !== undefined && typeof value[key] !== "string") fail(`${label}: ${key} must be a string`);
   if (value.keywords !== undefined && (!Array.isArray(value.keywords) || value.keywords.some((x: unknown) => typeof x !== "string"))) fail(`${label}: keywords must contain only strings`);
@@ -143,7 +147,12 @@ function validateSkills(skillsRoot: string) {
 function validateTagValue(tag: string, versions: string[], label: string) {
   if (!/^v\d+\.\d+\.\d+$/.test(tag)) { fail(`${label}: tag must be vX.Y.Z semver`); return; }
   const expected = tag.slice(1);
-  for (const version of versions) if (version !== expected) fail(`${label}: ${tag} does not match version ${version}`);
+  for (const version of versions) {
+    let base: string;
+    try { base = baseVersion(version); }
+    catch { fail(`${label}: invalid version ${version}`); continue; }
+    if (base !== expected) fail(`${label}: ${tag} does not match base version ${base}`);
+  }
 }
 
 function validateReleaseTag(tag: string) {
@@ -199,6 +208,14 @@ function validatePackage(packageRoot: string, readme?: string) {
 
 function validateRepository() {
   validatePackage(plugin, join(root, "README.md"));
+  const packageVersion = json(join(root, "package.json")).version;
+  const codexVersion = json(join(plugin, ".codex-plugin", "plugin.json")).version;
+  if (typeof packageVersion !== "string") fail("package.json: version must be a string");
+  else {
+    try {
+      if (packageVersion !== baseVersion(String(codexVersion))) fail(`package.json: version ${packageVersion} must equal Codex manifest base version`);
+    } catch { fail("Codex manifest: version must be a valid Codex plugin version"); }
+  }
   validateFixtures();
 }
 
@@ -212,7 +229,7 @@ async function run(command: string, args: string[], cwd = root): Promise<string>
 async function release(checkOnly: boolean) {
   validateRepository();
   if (errors.length) return;
-  const version = json(join(plugin, ".codex-plugin", "plugin.json")).version;
+  const version = baseVersion(json(join(plugin, ".codex-plugin", "plugin.json")).version);
   const dist = join(root, "dist");
   mkdirSync(dist, { recursive: true });
   const artifact = join(dist, `sol-advisor-${version}.tar.gz`);
@@ -245,7 +262,7 @@ async function release(checkOnly: boolean) {
       const prefs={client:"codex",scope:"project",workspace:runtimeWork,orchestrator:{model:"inherit"},roles:{routine:{model:"gpt-5.6-terra",effort:"high"},high:{model:"gpt-5.6-terra",effort:"high"},advisor:{model:"gpt-5.6-sol",effort:"high",readonly:true}}};
       const missing=await call("get_setup_status"), saved=await call("save_preferences",prefs), preview=await call("render_client_adapter",{workspace:runtimeWork}), installed=await call("install_client_adapter",{workspace:runtimeWork,confirmationToken:preview.confirmationToken}), uninstallPreview=await call("uninstall_client_adapter",{}), removed=await call("uninstall_client_adapter",{confirmationToken:uninstallPreview.confirmationToken});
       server.stdin.end(); reader.releaseLock(); const runtimeErr=await new Response(server.stderr).text(), runtimeCode=await server.exited;
-      if(runtimeCode!==0) fail(`extracted MCP server failed: ${runtimeErr}`); else if(init?.result?.serverInfo?.name!=="sol-advisor"||listed?.result?.tools?.length!==8||missing?.status!=="missing"||!saved?.saved||installed?.installed?.length!==3||removed?.removed?.length!==3) fail("extracted MCP server core-flow check failed");
+      if(runtimeCode!==0) fail(`extracted MCP server failed: ${runtimeErr}`); else if(init?.result?.serverInfo?.name!=="sol-advisor"||init?.result?.serverInfo?.version!==version||listed?.result?.tools?.length!==8||missing?.status!=="missing"||!saved?.saved||saved?.preferences?.pluginVersion!==version||installed?.installed?.length!==3||removed?.removed?.length!==3) fail("extracted MCP server core-flow check failed");
     }
     const digest = createHash("sha256").update(readFileSync(artifact)).digest("hex");
     await Bun.write(`${artifact}.sha256`, `${digest}  ${basename(artifact)}\n`);

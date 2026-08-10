@@ -14,6 +14,15 @@ beforeEach(()=>{setHomeResolverForTests();__resetDataPinForTests();__setWindowsA
 afterEach(()=>{__setManifestWriteFaultForTests(undefined);__setWindowsAclReaderForTests();__resetDataPinForTests();setHomeResolverForTests();delete process.env.PLUGIN_DATA;rmSync(root,{recursive:true,force:true});});
 
 describe("MCP protocol",()=>{
+ test("reports and saves the packaged Codex manifest base version",async()=>{
+  const codexManifest=JSON.parse(readFileSync(join(import.meta.dir,"..",".codex-plugin","plugin.json"),"utf8"));
+  const expectedProductVersion="0.6.0";
+  const initialized:any=await handle({jsonrpc:"2.0",id:8,method:"initialize",params:{protocolVersion:"2025-03-26"}});
+  const saved:any=await callTool("save_preferences",base());
+  expect(initialized.result.serverInfo.version).toBe(expectedProductVersion);
+  expect(saved.preferences.pluginVersion).toBe(expectedProductVersion);
+  expect(expectedProductVersion).toBe(String(codexManifest.version).split("+",1)[0]);
+ });
  test("initialize ping and tools",async()=>{
   expect((await handle({jsonrpc:"2.0",id:1,method:"initialize",params:{protocolVersion:"x"}}))?.result.serverInfo.name).toBe("sol-advisor");
   expect((await handle({jsonrpc:"2.0",id:10,method:"initialize",params:{protocolVersion:"unknown-future"}}))?.result.protocolVersion).toBe("2025-03-26");

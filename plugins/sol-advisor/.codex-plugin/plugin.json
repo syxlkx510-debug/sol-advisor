@@ -1,7 +1,7 @@
 {
   "name": "sol-advisor",
-  "version": "0.5.0+codex.20260809135432",
-  "description": "Configurable architect workflow that inherits the parent model, supports exact native roles, preserves explicit opt-in GPT-5.6 Luna app tasks through Codex app task tools, and retains fresh Sol review compatibility.",
+  "version": "0.6.0",
+  "description": "Configurable Codex-only architect workflow with exact native roles and explicit opt-in GPT-5.6 Luna app tasks.",
   "author": {
     "name": "Daniel McAteer",
     "url": "https://github.com/DannyMac180"
@@ -19,8 +19,8 @@
   "mcpServers": "./.mcp.json",
   "interface": {
     "displayName": "Sol Advisor",
-    "shortDescription": "Inherit the parent model, configure exact native roles, or explicitly opt into Luna tasks.",
-    "longDescription": "Sol Advisor runs lazy parent-chat setup, stores non-secret exact role preferences, safely previews and installs Codex-native adapters, and preserves the explicit opt-in GPT-5.6 Luna / Max app-task lane through Codex app task tools. The parent owns architecture, diff verification, correction loops, and acceptance; the retained native compatibility lane uses Terra / High plus a fresh Sol review. The opt-in lane uses list_projects, list_threads, create_thread, wait_threads, read_thread, and send_message_to_thread.",
+    "shortDescription": "Configure exact native roles or explicitly opt into Luna tasks.",
+    "longDescription": "Sol Advisor runs lazy parent-chat setup, stores non-secret exact role preferences, safely previews and installs Codex-native adapters, and preserves the explicit opt-in GPT-5.6 Luna / Max app-task lane through Codex app task tools. The parent owns architecture, diff verification, correction loops, and acceptance. The opt-in lane uses list_projects, list_threads, create_thread, wait_threads, read_thread, and send_message_to_thread.",
     "developerName": "Daniel McAteer",
     "category": "Productivity",
     "capabilities": [
@@ -29,7 +29,7 @@
     ],
     "websiteURL": "https://github.com/DannyMac180/sol-advisor",
     "defaultPrompt": [
-      "Use Sol Advisor's native lane to build this feature, verify it, and obtain the fresh Sol review before completion.",
+      "Use Sol Advisor's configured native roles to build this feature, verify it, and obtain an independent advisor review before completion.",
       "Use the Luna task lane only when I explicitly authorize it; create user-visible GPT-5.6 Luna / Max tasks through Codex app task tools and keep primary review and acceptance in this task."
     ]
   }
