@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, rmdirSync, symlinkSync, writeFileSync, existsSync, realpathSync, chmodSync, statSync, renameSync, readdirSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { homedir, tmpdir } from "node:os";
 import { __resetDataPinForTests, __setManifestWriteFaultForTests, callTool, handle, renderAdapter } from "./server";
 import * as server from "./server";
@@ -8,6 +8,7 @@ import * as packagedVersion from "./version";
 import { __setWindowsAclReaderForTests } from "./private-directory";
 
 let root="", data="", workspace="";
+const repositoryRoot=resolve(import.meta.dir,"..","..","..");
 const base=(scope:"project"|"user"="project")=>({client:"codex",scope,workspace,orchestrator:{model:"inherit",recommendation:{model:"gpt-5.6-sol",effort:"high"}},roles:{routine:{model:"gpt-5.6-luna",effort:"max"},high:{model:"gpt-5.6-terra",effort:"xhigh"},advisor:{model:"gpt-5.6-sol",effort:"xhigh",readonly:true}}});
 const setHomeResolverForTests=(resolver?:()=>string)=>(server as any).__setHomeResolverForTests?.(resolver);
 const privateWindowsAcl=()=>({owner:"S-1-5-21-test",currentUser:"S-1-5-21-test",rules:[{identity:"S-1-5-21-test",access:"Allow" as const,rights:2032127}]});
@@ -153,6 +154,18 @@ describe("configuration",()=>{
 });
 
 describe("adapter rendering and lifecycle",()=>{
+ test("keeps tracked Codex role adapters byte-identical to the current renderer",async()=>{
+  const saved:any=await callTool("save_preferences",base());
+  const preview:any=renderAdapter(saved.preferences,workspace,{registerPreview:false});
+  for(const file of preview.files){
+   const tracked=join(repositoryRoot,".codex","agents",basename(file.path));
+   expect(readFileSync(tracked,"utf8")).toBe(file.content);
+  }
+ });
+ test("forces LF checkouts for tracked Codex role adapters",()=>{
+  const attributes=readFileSync(join(repositoryRoot,".gitattributes"),"utf8");
+  expect(attributes.split(/\r?\n/)).toContain(".codex/agents/sol-advisor-*.toml text eol=lf");
+ });
  test("renders only the exact three Codex TOML roles",async()=>{
   const saved:any=await callTool("save_preferences",base());const preview:any=await callTool("render_client_adapter",{workspace});const workspacePath=realpathSync(workspace);
   expect((renderAdapter(saved.preferences,workspace,{registerPreview:false}) as any).confirmationToken).toBeUndefined();
