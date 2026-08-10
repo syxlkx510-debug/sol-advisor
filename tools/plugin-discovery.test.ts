@@ -83,6 +83,17 @@ function withFixture<T>(callback: (root: string, day: string) => T): T {
   }
 }
 
+function withEmptySessionsFixture<T>(callback: (root: string) => T): T {
+  const container = mkdtempSync(join(tmpdir(), "sol-advisor-runtime-test-"));
+  const root = join(container, "sessions");
+  try {
+    mkdirSync(root, { recursive: true });
+    return callback(root);
+  } finally {
+    rmSync(container, { recursive: true, force: true });
+  }
+}
+
 function inspectFixture(threadId: string, setup: (day: string) => void) {
   return withFixture((root, day) => {
     setup(day);
@@ -497,6 +508,48 @@ describe("native runtime inspector", () => {
       },
       { limits: { maxDirectories: 1 } },
     )).toThrow("session directory traversal exceeded the directory limit.");
+  });
+
+  test("accepts a directory containing exactly maxEntries entries", () => {
+    const threadId = "21212121-2121-7212-8212-212121212121";
+    withEmptySessionsFixture((root) => {
+      writeRollout(root, `rollout-2026-08-09T00-00-00-${threadId}.jsonl`, completeRollout(threadId));
+      writeFileSync(join(root, "first-entry.txt"), "first", "utf8");
+      writeFileSync(join(root, "second-entry.txt"), "second", "utf8");
+
+      expect(inspectRuntime(root, threadId, {
+        limits: { maxDirectories: 1, maxEntries: 3 },
+      }).thread_id).toBe(threadId);
+    });
+  });
+
+  test("stops at the first entry beyond maxEntries without leaking later names or content", () => {
+    const threadId = "22222222-2222-7222-8222-222222222222";
+    withEmptySessionsFixture((root) => {
+      writeFileSync(join(root, "first-entry.txt"), "first", "utf8");
+      writeFileSync(
+        join(root, "DO_NOT_LEAK_AFTER_ENTRY_OVERFLOW.txt"),
+        "DO_NOT_LEAK_AFTER_ENTRY_OVERFLOW_CONTENT",
+        "utf8",
+      );
+
+      let errorMessage = "";
+      try {
+        inspectRuntime(root, threadId, {
+          limits: { maxDirectories: 1, maxEntries: 1 },
+        });
+      } catch (error) {
+        errorMessage = error instanceof Error ? error.message : String(error);
+      }
+      expect(errorMessage).toBe("session directory traversal exceeded the entry limit.");
+      expect(errorMessage).not.toContain("DO_NOT_LEAK_AFTER_ENTRY_OVERFLOW");
+    });
+  });
+
+  test("streams directory entries instead of materializing them with readdirSync", () => {
+    const source = readFileSync(runtimeInspector, "utf8");
+    expect(source).toContain("opendirSync(");
+    expect(source).not.toContain("readdirSync(");
   });
 
   test("importing the runtime inspector does not execute its CLI", () => {

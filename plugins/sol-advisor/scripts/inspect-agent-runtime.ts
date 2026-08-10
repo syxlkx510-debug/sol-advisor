@@ -3,11 +3,11 @@ import {
   fstatSync,
   lstatSync,
   openSync,
+  opendirSync,
   readSync,
-  readdirSync,
   realpathSync,
   statSync,
-  type Dirent,
+  type Dir,
   type BigIntStats,
 } from "node:fs";
 import { homedir } from "node:os";
@@ -55,6 +55,7 @@ const DIRECTORY_LIMIT_EXCEEDED =
   "session directory traversal exceeded the directory limit.";
 const ENTRY_LIMIT_EXCEEDED =
   "session directory traversal exceeded the entry limit.";
+const DIRECTORY_CLOSE_FAILED = "could not close session directory.";
 const ROLLOUT_TOO_LARGE = "matched rollout exceeds the maximum size.";
 const LINE_TOO_LARGE = "rollout contains a line exceeding the maximum size.";
 const RECORD_LIMIT_EXCEEDED = "rollout exceeds the record limit.";
@@ -215,29 +216,42 @@ function findRolloutFiles(
     if (directory === null) continue;
     if (++directoriesVisited > limits.maxDirectories) fail(DIRECTORY_LIMIT_EXCEEDED);
 
-    let entries: Dirent[];
+    let directoryHandle: Dir | undefined;
+    let primaryFailure = false;
     try {
-      entries = readdirSync(directory, { withFileTypes: true });
-    } catch {
+      directoryHandle = opendirSync(directory);
+      while (true) {
+        const entry = directoryHandle.readSync();
+        if (entry === null) break;
+        if (++entriesVisited > limits.maxEntries) fail(ENTRY_LIMIT_EXCEEDED);
+        if (entry.isSymbolicLink()) continue;
+
+        const path = join(directory, entry.name);
+        if (entry.isDirectory()) {
+          stack.push(path);
+        } else if (
+          entry.isFile() &&
+          entry.name.startsWith("rollout-") &&
+          entry.name.endsWith(suffix)
+        ) {
+          matches.push(path);
+          if (matches.length > 1) break;
+        }
+      }
+    } catch (error) {
+      primaryFailure = true;
+      if (error instanceof RuntimeInspectionError) throw error;
       fail("could not enumerate rollout filenames under the sessions directory.");
-    }
-
-    for (const entry of entries) {
-      if (++entriesVisited > limits.maxEntries) fail(ENTRY_LIMIT_EXCEEDED);
-      if (entry.isSymbolicLink()) continue;
-
-      const path = join(directory, entry.name);
-      if (entry.isDirectory()) {
-        stack.push(path);
-      } else if (
-        entry.isFile() &&
-        entry.name.startsWith("rollout-") &&
-        entry.name.endsWith(suffix)
-      ) {
-        matches.push(path);
-        if (matches.length > 1) return matches;
+    } finally {
+      if (directoryHandle !== undefined) {
+        try {
+          directoryHandle.closeSync();
+        } catch {
+          if (!primaryFailure) fail(DIRECTORY_CLOSE_FAILED);
+        }
       }
     }
+    if (matches.length > 1) return matches;
   }
 
   return matches;
