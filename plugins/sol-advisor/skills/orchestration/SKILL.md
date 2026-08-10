@@ -39,7 +39,16 @@ missing or inconsistent evidence:
 2. Call `validate_configuration` for the saved workspace.
 3. Require `adapterStatus=current`.
 4. Confirm the exact configured role name is exposed by the collaboration tool.
-5. Spawn that exact role without model or effort overrides.
+5. Spawn that exact role with this shape:
+
+   ```text
+   agent_type: <the exact configured role>
+   fork_turns: "none"
+   ```
+
+   Do not pass `model`, `reasoning_effort`, or effort overrides. `fork_turns: "none"`
+   is required: the configured role file alone controls its saved model and effort,
+   and the spawn starts with independent context.
 6. Inspect public runtime details first. On Windows, set `$skillDir` to the directory
    containing this `SKILL.md`, resolve the Bun inspector from it, and run it with the
    UUID returned for the native child:
@@ -66,7 +75,8 @@ The configured role file, not the spawn call, owns the saved model and effort.
 Read [the configured role contracts](references/role-contracts.md) before the first
 configured native delegation in a session. Give every worker a complete bounded packet
 with file ownership. State that it is not alone in the codebase, must preserve
-concurrent edits, and must adapt to changes already present.
+concurrent edits, and must adapt to changes already present. A full packet is their
+only context; workers and reviewers must not rely on inherited history.
 
 Keep requirements resolution, architecture, interface decisions, complete diff
 inspection, and verification in the parent session. Treat worker reports as claims.
@@ -77,7 +87,8 @@ For a correction, use `sol_advisor_routine` or `sol_advisor_high` again accordin
 the corrected work's complexity. Do not silently repair a child result in the parent
 or substitute a different role. After parent verification, final native review always
 uses a fresh `sol_advisor_advisor`. The reviewer returns `ship`, `fix-first`, or
-`rethink` and never implements its own fixes.
+`rethink` and never implements its own fixes. Corrections and this final fresh advisor
+review use the same `fork_turns: "none"` spawn shape and complete packet.
 
 ## Explicit Luna app-task lane
 

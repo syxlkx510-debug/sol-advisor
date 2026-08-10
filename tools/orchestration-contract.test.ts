@@ -43,7 +43,7 @@ describe("Codex-only configured orchestration", () => {
     expect(skill).toContain("$nativeSubagentThreadId");
     expect(skill).toContain("workspace-write");
     expect(skill).toContain("behaviorally read-only");
-    expect(skill).toContain("without model or effort overrides");
+    expect(skill).toContain("Do not pass `model`, `reasoning_effort`, or effort overrides.");
     expect(skill).toContain("saved preferences");
   });
 
@@ -76,6 +76,22 @@ describe("Codex-only configured orchestration", () => {
     expect(lane).toMatch(/absent, false, or\s+inconsistent/);
     expect(lane).toContain("do not enable it");
     expect(lane).toContain("fail closed");
+  });
+
+  test("spawns every configured native role as an isolated complete-packet task", () => {
+    const skill = read("skills", "orchestration", "SKILL.md");
+    const contracts = read("skills", "orchestration", "references", "role-contracts.md");
+    for (const role of ["sol_advisor_routine", "sol_advisor_high", "sol_advisor_advisor"]) {
+      expect(skill).toContain(role);
+      expect(contracts).toContain(role);
+    }
+    for (const text of [skill, contracts]) {
+      expect(text).toContain('fork_turns: "none"');
+      expect(text).toMatch(/Do not pass `model`,\s*`reasoning_effort`, or effort overrides\./);
+    }
+    expect(skill).toMatch(/full packet is their\s+only context/);
+    expect(contracts).toContain("must not rely on inherited history");
+    expect(contracts).toContain("fresh independent review");
   });
 
   test("publishes the configured-role prompt and TypeScript-only package commands", () => {

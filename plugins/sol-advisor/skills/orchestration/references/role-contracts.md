@@ -9,10 +9,12 @@ lane.
 
 Before every native spawn, follow the configured native spawn protocol in `SKILL.md`:
 require ready setup, saved preferences, `adapterStatus=current`, exact role exposure,
-and runtime evidence. Spawn with no model or effort override. Compare the observed
-role, model, and effort with saved preferences, and stop on absent or inconsistent
-evidence. For the reviewer, also capture the observed sandbox policy and permission
-profile.
+and runtime evidence. Spawn the exact configured role with `fork_turns: "none"`.
+Do not pass `model`, `reasoning_effort`, or effort overrides. `fork_turns: "none"` is
+required so the configured role file controls its saved model and effort, and a fresh
+independent review cannot inherit history. Compare the observed role, model, and
+effort with saved preferences, and stop on absent or inconsistent evidence. For the
+reviewer, also capture the observed sandbox policy and permission profile.
 
 ## Worker selections
 
@@ -21,7 +23,9 @@ profile.
   broad work.
 
 Both worker selections receive this complete packet. Replace every placeholder and do
-not omit a section.
+not omit a section. Spawn `sol_advisor_routine` or `sol_advisor_high` with
+`fork_turns: "none"`; the worker must not rely on inherited history because this
+complete packet is its only context.
 
 ```text
 OBJECTIVE
@@ -64,9 +68,12 @@ The parent inspects the actual diff and reruns verification after every worker r
 
 ## Final configured reviewer
 
-After parent verification, spawn a fresh `sol_advisor_advisor` using the same runtime
-evidence protocol. The reviewer must remain behaviorally read-only, inspect the actual
-files and accumulated change set, and never implement fixes.
+After parent verification, spawn a fresh `sol_advisor_advisor` with
+`fork_turns: "none"` using the same runtime evidence protocol. Do not pass `model`,
+`reasoning_effort`, or effort overrides. The reviewer must remain behaviorally
+read-only, inspect the actual files and accumulated change set, never implement fixes,
+and must not rely on inherited history: the complete reviewer packet below is its only
+context and produces a fresh independent review.
 
 ```text
 STATED GOAL
