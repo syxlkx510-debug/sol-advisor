@@ -83,7 +83,13 @@ uses a fresh `sol_advisor_advisor`. The reviewer returns `ship`, `fix-first`, or
 
 Use the Codex app-task lane only when the user's current request explicitly says to
 use it. Ordinary implementation work, an earlier authorization, skill activation, or
-a saved native Luna routine does not authorize this lane. If explicitly authorized,
-read [the Luna task-lane contract](references/luna-task-lane.md) and follow it without
-using a configured native role as a fallback. Keep this lane separate from configured
-native role routing.
+a saved native Luna routine does not authorize this lane. Even with current-request
+authorization, first call `get_setup_status` and `get_preferences`. Require ready
+setup and a saved `appTaskLane` with `appTaskLane.enabled=true`,
+`model: "gpt-5.6-luna"`, and `effort: "max"`. The MCP stores `appTaskLane` only when
+it is enabled, so an absent value is disabled. If the value is absent, false, or
+inconsistent, fail closed: do not enable it, write preferences, create a task, or fall
+back to a configured native role.
+
+Only after these checks pass, read [the Luna task-lane contract](references/luna-task-lane.md)
+and follow it. Keep this lane separate from configured native role routing.

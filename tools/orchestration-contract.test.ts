@@ -10,14 +10,21 @@ describe("Codex-only configured orchestration", () => {
     const skill = read("skills", "orchestration", "SKILL.md");
     const contracts = read("skills", "orchestration", "references", "role-contracts.md");
     const setup = read("skills", "setup", "SKILL.md");
-    const active = `${skill}\n${contracts}\n${setup}`;
+    const lunaLane = read("skills", "orchestration", "references", "luna-task-lane.md");
+    const active = `${skill}\n${contracts}\n${setup}\n${lunaLane}`;
     for (const role of ["sol_advisor_routine", "sol_advisor_high", "sol_advisor_advisor"]) {
       expect(active).toContain(role);
     }
     for (const removed of [
       "sol_advisor_terra_implementer", "sol_advisor_sol_reviewer",
       "cursor", "vscode", "github-copilot", "kiro", "portable entry",
+      "GPT-5.6 Sol / High", "native Terra", "fresh Sol", "Terra / High",
     ]) expect(active.toLowerCase()).not.toContain(removed.toLowerCase());
+    for (const role of ["sol_advisor_routine", "sol_advisor_high", "sol_advisor_advisor"]) {
+      expect(lunaLane).toContain(role);
+    }
+    expect(lunaLane).toMatch(/parent retains\s+its own selected model and effort/i);
+    expect(lunaLane).toContain("never a fallback");
   });
 
   test("does not ship compatibility templates or shell preflight", () => {
@@ -57,6 +64,18 @@ describe("Codex-only configured orchestration", () => {
     expect(contracts).toContain("never implement fixes");
     expect(contracts).toContain("sandbox policy");
     expect(contracts).toContain("permission profile");
+  });
+
+  test("fails closed unless the explicit Luna lane is saved and exact", () => {
+    const skill = read("skills", "orchestration", "SKILL.md");
+    const lane = skill.slice(skill.indexOf("## Explicit Luna app-task lane"));
+    expect(lane).toContain("call `get_setup_status` and `get_preferences`");
+    expect(lane).toContain("appTaskLane.enabled=true");
+    expect(lane).toContain('model: "gpt-5.6-luna"');
+    expect(lane).toContain('effort: "max"');
+    expect(lane).toMatch(/absent, false, or\s+inconsistent/);
+    expect(lane).toContain("do not enable it");
+    expect(lane).toContain("fail closed");
   });
 
   test("publishes the configured-role prompt and TypeScript-only package commands", () => {

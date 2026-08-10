@@ -1,9 +1,9 @@
 # Luna task-lane contract
 
 This is the normative contract for Sol Advisor's explicit, user-visible Luna task
-lane. It is a Codex app-task workflow outside native subagent V2. The primary
-GPT-5.6 Sol / High task remains the architect, reviewer, correction owner, PR
-authority, and final acceptor.
+lane. It is a Codex app-task workflow outside native subagent V2. The parent retains
+its own selected model and effort and does not change them. The parent remains the
+architect, reviewer, correction owner, PR authority, and final acceptor.
 
 ## Scope and authorization
 
@@ -13,8 +13,9 @@ authority, and final acceptor.
 - A created task is user-visible and user-owned. The primary task must not imply that
   the child will inherit the parent's full history or receive an automatic callback.
 - This lane never uses native `spawn_agent`, a native custom-agent role, or a Luna
-  companion TOML. The existing native Terra / High -> fresh Sol / High lane remains
-  available and is not replaced by this contract.
+  companion TOML. Native work uses only the saved configured roles
+  `sol_advisor_routine`, `sol_advisor_high`, and `sol_advisor_advisor`. This app-task
+  lane remains separate from those roles and is never a fallback for them.
 - Before creation, confirm that the app exposes `list_projects`, `list_threads`,
   `create_thread`, `wait_threads`, `read_thread`, and `send_message_to_thread`, and
   that the selected host accepts `gpt-5.6-luna` with `max` thinking. If any required
