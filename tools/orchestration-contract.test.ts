@@ -190,6 +190,12 @@ describe("Codex-only configured orchestration", () => {
     expect(readme).toContain("finally");
     expect(readme).toContain("$ErrorActionPreference = $oldErrorActionPreference");
     expect(readme).not.toContain("Assert-NativeSuccess");
+    const directNativeInvocations = [...readme.matchAll(/& \$[A-Za-z_][A-Za-z0-9_.]*/g)].map((match) => match[0]);
+    expect(new Set(directNativeInvocations)).toEqual(new Set(["& $FilePath"]));
+    expect(readme).not.toContain("& $codexCommand.Source");
+    expect(readme).not.toContain("& $candidate.FullName");
+    expect(readme).toContain("Invoke-NativeChecked -FilePath $codexCommand.Source -ArgumentList @('plugin','--help') -Step 'Codex PATH plugin probe' *> $null");
+    expect(readme).toContain("Invoke-NativeChecked -FilePath $candidate.FullName -ArgumentList @('plugin','--help') -Step 'Codex bundled plugin probe' *> $null");
     const checkedStep = (text: string, snippet: string) => expect(text).toContain(snippet);
     checkedStep(readme, "Invoke-NativeChecked -FilePath $codexCli -ArgumentList @('--version') -Step 'Codex --version'");
     checkedStep(readme, "Invoke-NativeChecked -FilePath $codexCli -ArgumentList @('plugin','--help') -Step 'Codex plugin --help'");
@@ -239,7 +245,7 @@ describe("Codex-only configured orchestration", () => {
     expect(readme).toContain("Get-ChildItem");
     expect(readme).toContain("-Recurse");
     expect(readme).toContain("Sort-Object LastWriteTime -Descending");
-    expect(readme).toContain("probeExitCode -eq 0");
+    expect(readme).not.toContain("probeExitCode");
     expect(readme).toContain("throw");
     expect(readme).toContain("If you open a new terminal, repeat the CLI resolution and preflight");
     expect(readme).toContain("$repoRoot = (Resolve-Path");

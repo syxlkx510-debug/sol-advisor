@@ -47,12 +47,10 @@ function Invoke-NativeChecked {
 $codexCli = $null
 $codexCommand = Get-Command codex -ErrorAction SilentlyContinue
 if ($codexCommand) {
-    $probeExitCode = 1
     try {
-        & $codexCommand.Source plugin --help *> $null
-        $probeExitCode = $LASTEXITCODE
+        Invoke-NativeChecked -FilePath $codexCommand.Source -ArgumentList @('plugin','--help') -Step 'Codex PATH plugin probe' *> $null
+        $codexCli = $codexCommand.Source
     } catch {}
-    if ($probeExitCode -eq 0) { $codexCli = $codexCommand.Source }
 }
 if (-not $codexCli) {
     $codexBinRoot = Join-Path $env:LOCALAPPDATA 'OpenAI\Codex\bin'
@@ -61,15 +59,11 @@ if (-not $codexCli) {
             Sort-Object LastWriteTime -Descending
     )
     foreach ($candidate in $bundledCandidates) {
-        $probeExitCode = 1
         try {
-            & $candidate.FullName plugin --help *> $null
-            $probeExitCode = $LASTEXITCODE
-        } catch {}
-        if ($probeExitCode -eq 0) {
+            Invoke-NativeChecked -FilePath $candidate.FullName -ArgumentList @('plugin','--help') -Step 'Codex bundled plugin probe' *> $null
             $codexCli = $candidate.FullName
             break
-        }
+        } catch {}
     }
 }
 if (-not $codexCli) {
