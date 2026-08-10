@@ -1,6 +1,6 @@
 {
   "name": "sol-advisor",
-  "version": "0.6.0",
+  "version": "0.6.0+codex.20260810064551",
   "description": "Configurable Codex-only architect workflow with exact native roles and explicit opt-in GPT-5.6 Luna app tasks.",
   "author": {
     "name": "Daniel McAteer",
