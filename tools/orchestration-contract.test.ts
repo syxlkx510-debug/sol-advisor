@@ -167,51 +167,59 @@ describe("Codex-only configured orchestration", () => {
     expect(prerequisites).not.toMatch(/MCP tools?\s+(?:enabled|available|present)/i);
     expect(prerequisites).not.toMatch(/enabled.*MCP|MCP.*enabled/i);
     expect(prerequisites).not.toContain("PLUGIN_DATA");
-    const preflight = readme.indexOf("& $codexCli --version");
-    const bunPreflight = readme.indexOf("& $bunCli --version");
-    const codexSupportPreflight = readme.indexOf("& $codexCli plugin --help");
-    const marketplaceInstall = readme.indexOf("& $codexCli plugin marketplace add $repoRoot");
-    const pluginInstall = readme.indexOf("& $codexCli plugin add sol-advisor@sol-advisor");
-    const pluginRemove = readme.indexOf("& $codexCli plugin remove sol-advisor@sol-advisor");
+    const preflight = readme.indexOf("Invoke-NativeChecked -FilePath $codexCli -ArgumentList @('--version') -Step 'Codex --version'");
+    const bunPreflight = readme.indexOf("Invoke-NativeChecked -FilePath $bunCli -ArgumentList @('--version') -Step 'Bun --version'");
+    const codexSupportPreflight = readme.indexOf("Invoke-NativeChecked -FilePath $codexCli -ArgumentList @('plugin','--help') -Step 'Codex plugin --help'");
+    const marketplaceInstall = readme.indexOf("Invoke-NativeChecked -FilePath $codexCli -ArgumentList @('plugin','marketplace','add',$repoRoot) -Step 'Codex plugin marketplace add'");
+    const pluginInstall = readme.indexOf("Invoke-NativeChecked -FilePath $codexCli -ArgumentList @('plugin','add','sol-advisor@sol-advisor') -Step 'Codex plugin add'");
+    const pluginRemove = readme.indexOf("Invoke-NativeChecked -FilePath $codexCli -ArgumentList @('plugin','remove','sol-advisor@sol-advisor') -Step 'Codex plugin remove'");
     expect(preflight).toBeGreaterThan(prerequisitesEnd);
     expect(bunPreflight).toBeGreaterThan(preflight);
     expect(codexSupportPreflight).toBeGreaterThan(preflight);
     expect(marketplaceInstall).toBeGreaterThan(codexSupportPreflight);
     expect(pluginInstall).toBeGreaterThan(marketplaceInstall);
     expect(pluginRemove).toBeGreaterThan(pluginInstall);
-    const nativeChecked = (text: string, command: string) => {
-      const escaped = command.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-      expect(text).toMatch(new RegExp(`${escaped}\\r?\\n\\s*Assert-NativeSuccess`));
-    };
-    expect(readme).toContain("function Assert-NativeSuccess");
-    nativeChecked(readme, "& $codexCli --version");
-    nativeChecked(readme, "& $codexCli plugin --help");
-    nativeChecked(readme, "& $codexCli plugin marketplace add $repoRoot");
-    nativeChecked(readme, "& $codexCli plugin remove sol-advisor@sol-advisor");
-    const pluginAddChecks = [...readme.matchAll(/& \$codexCli plugin add sol-advisor@sol-advisor\r?\n\s*Assert-NativeSuccess/g)];
+    expect(readme).toContain("function Invoke-NativeChecked");
+    expect(readme).toContain("[string] $FilePath");
+    expect(readme).toContain("[string[]] $ArgumentList");
+    expect(readme).toContain("[string] $Step");
+    expect(readme).toContain("$oldErrorActionPreference");
+    expect(readme).toContain("$ErrorActionPreference = 'Stop'");
+    expect(readme).toContain("& $FilePath @ArgumentList");
+    expect(readme).toContain("catch");
+    expect(readme).toContain("finally");
+    expect(readme).toContain("$ErrorActionPreference = $oldErrorActionPreference");
+    expect(readme).not.toContain("Assert-NativeSuccess");
+    const checkedStep = (text: string, snippet: string) => expect(text).toContain(snippet);
+    checkedStep(readme, "Invoke-NativeChecked -FilePath $codexCli -ArgumentList @('--version') -Step 'Codex --version'");
+    checkedStep(readme, "Invoke-NativeChecked -FilePath $codexCli -ArgumentList @('plugin','--help') -Step 'Codex plugin --help'");
+    checkedStep(readme, "Invoke-NativeChecked -FilePath $codexCli -ArgumentList @('plugin','marketplace','add',$repoRoot) -Step 'Codex plugin marketplace add'");
+    checkedStep(readme, "Invoke-NativeChecked -FilePath $codexCli -ArgumentList @('plugin','remove','sol-advisor@sol-advisor') -Step 'Codex plugin remove'");
+    const pluginAddChecks = [...readme.matchAll(/Invoke-NativeChecked -FilePath \$codexCli -ArgumentList @\('plugin','add','sol-advisor@sol-advisor'\) -Step '[^']+'/g)];
     expect(pluginAddChecks.length).toBeGreaterThanOrEqual(2);
     const windowsStart = readme.indexOf("## Windows-native verification");
     const windowsEnd = readme.indexOf("\n## Read-only reporting", windowsStart + "## Windows-native verification".length);
     expect(windowsStart).toBeGreaterThanOrEqual(0);
     expect(windowsEnd).toBeGreaterThan(windowsStart);
     const windowsVerification = readme.slice(windowsStart, windowsEnd);
-    expect(windowsVerification).toContain("function Assert-NativeSuccess");
+    expect(windowsVerification).toContain("function Invoke-NativeChecked");
     expect(windowsVerification).toContain("Get-Command bun");
     expect(windowsVerification).toContain("$bunCli");
     for (const command of [
-      "& $bunCli --version",
-      "& $bunCli install --frozen-lockfile",
-      "& $bunCli run test",
-      "& $bunCli run validate",
-      "& $bunCli run release:check",
-      "& $bunCli run tag:check -- v0.6.0",
-      "& $gitCli diff --check",
-    ]) nativeChecked(windowsVerification, command);
+      "Invoke-NativeChecked -FilePath $bunCli -ArgumentList @('--version') -Step 'Bun --version'",
+      "Invoke-NativeChecked -FilePath $bunCli -ArgumentList @('install','--frozen-lockfile') -Step 'bun install --frozen-lockfile'",
+      "Invoke-NativeChecked -FilePath $bunCli -ArgumentList @('run','test') -Step 'bun run test'",
+      "Invoke-NativeChecked -FilePath $bunCli -ArgumentList @('run','validate') -Step 'bun run validate'",
+      "Invoke-NativeChecked -FilePath $bunCli -ArgumentList @('run','release:check') -Step 'bun run release:check'",
+      "Invoke-NativeChecked -FilePath $bunCli -ArgumentList @('run','tag:check','--','v0.6.0') -Step 'bun run tag:check -- v0.6.0'",
+      "Invoke-NativeChecked -FilePath $gitCli -ArgumentList @('diff','--check') -Step 'git diff --check'",
+    ]) checkedStep(windowsVerification, command);
     expect(windowsVerification).toContain("Get-Command git");
     expect(windowsVerification).toContain("$gitCli");
-    expect(windowsVerification).toMatch(/& \$bunCli \$runtimeInspector[^\r\n]*\r?\n\s*Assert-NativeSuccess/);
+    checkedStep(windowsVerification, "Invoke-NativeChecked -FilePath $bunCli -ArgumentList @($runtimeInspector, '<child-rollout-uuid>') -Step 'Bun runtime inspector'");
     expect(readme).not.toMatch(/^\s*bun\s+(?:install|run)\b/gm);
     expect(readme).not.toMatch(/^\s*(?:bun|git|codex)\s+(?:--version|plugin|install|run|diff)\b/gm);
+    expect(readme).not.toMatch(/& \$(?:codexCli|bunCli|gitCli)\b/g);
     const uninstallSectionStart = readme.indexOf("## Reconfigure, uninstall, and troubleshooting");
     const uninstallSectionEnd = readme.indexOf("\n## MCP tools", uninstallSectionStart + "## Reconfigure, uninstall, and troubleshooting".length);
     expect(uninstallSectionStart).toBeGreaterThanOrEqual(0);
@@ -220,7 +228,7 @@ describe("Codex-only configured orchestration", () => {
     const parentUninstall = uninstallSection.indexOf("uninstall_client_adapter");
     const fullExit = uninstallSection.indexOf("Fully exit Codex");
     const mcpEnded = uninstallSection.indexOf("active MCP");
-    const cliRemove = uninstallSection.indexOf("& $codexCli plugin remove sol-advisor@sol-advisor");
+    const cliRemove = uninstallSection.indexOf("Invoke-NativeChecked -FilePath $codexCli -ArgumentList @('plugin','remove','sol-advisor@sol-advisor') -Step 'Codex plugin remove'");
     expect(parentUninstall).toBeGreaterThanOrEqual(0);
     expect(fullExit).toBeGreaterThan(parentUninstall);
     expect(mcpEnded).toBeGreaterThan(fullExit);
@@ -235,9 +243,9 @@ describe("Codex-only configured orchestration", () => {
     expect(readme).toContain("throw");
     expect(readme).toContain("If you open a new terminal, repeat the CLI resolution and preflight");
     expect(readme).toContain("$repoRoot = (Resolve-Path");
-    expect(readme).toContain("& $codexCli plugin marketplace add $repoRoot");
-    expect(readme).toContain("& $codexCli plugin add sol-advisor@sol-advisor");
-    expect(readme).toContain("& $codexCli plugin remove sol-advisor@sol-advisor");
+    expect(readme).toContain("Invoke-NativeChecked -FilePath $codexCli -ArgumentList @('plugin','marketplace','add',$repoRoot) -Step 'Codex plugin marketplace add'");
+    expect(readme).toContain("Invoke-NativeChecked -FilePath $codexCli -ArgumentList @('plugin','add','sol-advisor@sol-advisor') -Step 'Codex plugin add'");
+    expect(readme).toContain("Invoke-NativeChecked -FilePath $codexCli -ArgumentList @('plugin','remove','sol-advisor@sol-advisor') -Step 'Codex plugin remove'");
     expect(readme).not.toMatch(/^\s*codex\s+plugin\s+(?:marketplace add|add|remove)\b/gm);
     expect(readme).not.toMatch(/cfac/i);
     expect(readme).not.toMatch(/[0-9a-f]{32,}/i);
@@ -250,9 +258,8 @@ describe("Codex-only configured orchestration", () => {
     expect(readme).toContain("app-task lane");
     expect(readme).toContain("behaviorally read-only");
     expect(readme).toContain("workspace-write");
-    expect(readme).toContain("& $codexCli --version");
-    expect(readme).toContain("& $codexCli plugin --help");
-    expect(readme).toContain("& $bunCli --version");
+    expect(readme).toContain("Invoke-NativeChecked -FilePath $codexCli");
+    expect(readme).toContain("Invoke-NativeChecked -FilePath $bunCli");
     expect(readme).toContain("Access is denied");
     expect(readme).toContain("拒绝访问");
     expect(readme).toContain("WindowsApps");
@@ -260,7 +267,7 @@ describe("Codex-only configured orchestration", () => {
     expect(readme).toContain("$plugin-creator");
     expect(readme).toContain("scripts/update_plugin_cachebuster.py");
     expect(readme).toContain("current checkout");
-    expect(readme).toContain("plugin marketplace add $repoRoot");
+    expect(readme).toContain("plugin','marketplace','add',$repoRoot");
     expect(readme).not.toMatch(/[A-Z]:\\Users\\/i);
     expect(readme).not.toMatch(/[A-Z]:\\Codex_Projects\\/i);
     expect(readme).not.toMatch(/\bpython(?:3)?(?:\.exe)?\b/i);

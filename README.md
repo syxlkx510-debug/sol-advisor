@@ -25,8 +25,23 @@ for installation and resolve one executable Codex CLI. This checks the command o
 executable or changing `PATH`:
 
 ```powershell
-function Assert-NativeSuccess([string] $operation) {
-    if ($LASTEXITCODE -ne 0) { throw "$operation failed with exit code $LASTEXITCODE." }
+function Invoke-NativeChecked {
+    param(
+        [Parameter(Mandatory=$true)][string] $FilePath,
+        [Parameter()][string[]] $ArgumentList = @(),
+        [Parameter(Mandatory=$true)][string] $Step
+    )
+    $oldErrorActionPreference = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = 'Stop'
+        & $FilePath @ArgumentList
+        $exitCode = $LASTEXITCODE
+        if ($exitCode -ne 0) { throw "$Step failed with exit code $exitCode." }
+    } catch {
+        throw "$Step failed: native process could not start or exited unsuccessfully."
+    } finally {
+        $ErrorActionPreference = $oldErrorActionPreference
+    }
 }
 
 $codexCli = $null
@@ -60,16 +75,13 @@ if (-not $codexCli) {
 if (-not $codexCli) {
     throw 'No executable Codex CLI with plugin support was found. Stop and repair Codex before continuing.'
 }
-& $codexCli --version
-Assert-NativeSuccess 'Codex --version'
-& $codexCli plugin --help
-Assert-NativeSuccess 'Codex plugin --help'
+Invoke-NativeChecked -FilePath $codexCli -ArgumentList @('--version') -Step 'Codex --version'
+Invoke-NativeChecked -FilePath $codexCli -ArgumentList @('plugin','--help') -Step 'Codex plugin --help'
 $bunCli = $null
 $bunCommand = Get-Command bun -ErrorAction SilentlyContinue
 if ($bunCommand) { $bunCli = $bunCommand.Source }
 if (-not $bunCli) { throw 'No executable Bun CLI was found. Stop.' }
-& $bunCli --version
-Assert-NativeSuccess 'Bun --version'
+Invoke-NativeChecked -FilePath $bunCli -ArgumentList @('--version') -Step 'Bun --version'
 ```
 
 The two real `$codexCli` preflight commands must start successfully and print their
@@ -86,10 +98,8 @@ dynamically:
 
 ```powershell
 $repoRoot = (Resolve-Path -LiteralPath (Get-Location).Path).Path
-& $codexCli plugin marketplace add $repoRoot
-Assert-NativeSuccess 'Codex plugin marketplace add'
-& $codexCli plugin add sol-advisor@sol-advisor
-Assert-NativeSuccess 'Codex plugin add'
+Invoke-NativeChecked -FilePath $codexCli -ArgumentList @('plugin','marketplace','add',$repoRoot) -Step 'Codex plugin marketplace add'
+Invoke-NativeChecked -FilePath $codexCli -ArgumentList @('plugin','add','sol-advisor@sol-advisor') -Step 'Codex plugin add'
 ```
 
 The marketplace command is needed once per Codex installation. The second command
@@ -187,32 +197,40 @@ From the repository root, these commands use Bun and work in PowerShell without 
 POSIX shell dependency:
 
 ```powershell
-function Assert-NativeSuccess([string] $operation) {
-    if ($LASTEXITCODE -ne 0) { throw "$operation failed with exit code $LASTEXITCODE." }
+function Invoke-NativeChecked {
+    param(
+        [Parameter(Mandatory=$true)][string] $FilePath,
+        [Parameter()][string[]] $ArgumentList = @(),
+        [Parameter(Mandatory=$true)][string] $Step
+    )
+    $oldErrorActionPreference = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = 'Stop'
+        & $FilePath @ArgumentList
+        $exitCode = $LASTEXITCODE
+        if ($exitCode -ne 0) { throw "$Step failed with exit code $exitCode." }
+    } catch {
+        throw "$Step failed: native process could not start or exited unsuccessfully."
+    } finally {
+        $ErrorActionPreference = $oldErrorActionPreference
+    }
 }
 
 $bunCli = $null
 $bunCommand = Get-Command bun -ErrorAction SilentlyContinue
 if ($bunCommand) { $bunCli = $bunCommand.Source }
 if (-not $bunCli) { throw 'No executable Bun CLI was found. Stop.' }
-& $bunCli --version
-Assert-NativeSuccess 'Bun --version'
-& $bunCli install --frozen-lockfile
-Assert-NativeSuccess 'bun install --frozen-lockfile'
-& $bunCli run test
-Assert-NativeSuccess 'bun run test'
-& $bunCli run validate
-Assert-NativeSuccess 'bun run validate'
-& $bunCli run release:check
-Assert-NativeSuccess 'bun run release:check'
-& $bunCli run tag:check -- v0.6.0
-Assert-NativeSuccess 'bun run tag:check -- v0.6.0'
+Invoke-NativeChecked -FilePath $bunCli -ArgumentList @('--version') -Step 'Bun --version'
+Invoke-NativeChecked -FilePath $bunCli -ArgumentList @('install','--frozen-lockfile') -Step 'bun install --frozen-lockfile'
+Invoke-NativeChecked -FilePath $bunCli -ArgumentList @('run','test') -Step 'bun run test'
+Invoke-NativeChecked -FilePath $bunCli -ArgumentList @('run','validate') -Step 'bun run validate'
+Invoke-NativeChecked -FilePath $bunCli -ArgumentList @('run','release:check') -Step 'bun run release:check'
+Invoke-NativeChecked -FilePath $bunCli -ArgumentList @('run','tag:check','--','v0.6.0') -Step 'bun run tag:check -- v0.6.0'
 $gitCli = $null
 $gitCommand = Get-Command git -ErrorAction SilentlyContinue
 if ($gitCommand) { $gitCli = $gitCommand.Source }
 if (-not $gitCli) { throw 'No executable Git CLI was found. Stop.' }
-& $gitCli diff --check
-Assert-NativeSuccess 'git diff --check'
+Invoke-NativeChecked -FilePath $gitCli -ArgumentList @('diff','--check') -Step 'git diff --check'
 ```
 
 To inspect one child rollout's observed metadata, use the same verified PowerShell
@@ -222,8 +240,7 @@ TypeScript inspector with its lowercase UUID:
 ```powershell
 $repoRoot = (Resolve-Path -LiteralPath (Get-Location).Path).Path
 $runtimeInspector = Join-Path $repoRoot 'plugins\sol-advisor\scripts\inspect-agent-runtime.ts'
-& $bunCli $runtimeInspector '<child-rollout-uuid>'
-Assert-NativeSuccess 'Bun runtime inspector'
+Invoke-NativeChecked -FilePath $bunCli -ArgumentList @($runtimeInspector, '<child-rollout-uuid>') -Step 'Bun runtime inspector'
 ```
 
 It reports the role, model, reasoning effort, sandbox policy, permission profile, and
@@ -265,8 +282,7 @@ After the helper succeeds, rerun the version/discovery checks and, in the same
 PowerShell that resolved `$codexCli`, reinstall from the same repository marketplace:
 
 ```powershell
-& $codexCli plugin add sol-advisor@sol-advisor
-Assert-NativeSuccess 'Codex plugin add (cachebuster reinstall)'
+Invoke-NativeChecked -FilePath $codexCli -ArgumentList @('plugin','add','sol-advisor@sol-advisor') -Step 'Codex plugin add (cachebuster reinstall)'
 ```
 
 Then fully exit Codex and create a new task. Do not hand-edit the marketplace file, the
@@ -295,8 +311,7 @@ Adapter removal and plugin removal are separate operations. Follow this order:
    adapters are gone:
 
 ```powershell
-& $codexCli plugin remove sol-advisor@sol-advisor
-Assert-NativeSuccess 'Codex plugin remove'
+Invoke-NativeChecked -FilePath $codexCli -ArgumentList @('plugin','remove','sol-advisor@sol-advisor') -Step 'Codex plugin remove'
 ```
 
 4. Optionally reopen Codex. Do not delete user configuration, drifted adapter files, or
