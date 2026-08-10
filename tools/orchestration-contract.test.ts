@@ -205,9 +205,13 @@ describe("Codex-only configured orchestration", () => {
       "& $bunCli run validate",
       "& $bunCli run release:check",
       "& $bunCli run tag:check -- v0.6.0",
-      "git diff --check",
+      "& $gitCli diff --check",
     ]) nativeChecked(windowsVerification, command);
+    expect(windowsVerification).toContain("Get-Command git");
+    expect(windowsVerification).toContain("$gitCli");
+    expect(windowsVerification).toMatch(/& \$bunCli \$runtimeInspector[^\r\n]*\r?\n\s*Assert-NativeSuccess/);
     expect(readme).not.toMatch(/^\s*bun\s+(?:install|run)\b/gm);
+    expect(readme).not.toMatch(/^\s*(?:bun|git|codex)\s+(?:--version|plugin|install|run|diff)\b/gm);
     const uninstallSectionStart = readme.indexOf("## Reconfigure, uninstall, and troubleshooting");
     const uninstallSectionEnd = readme.indexOf("\n## MCP tools", uninstallSectionStart + "## Reconfigure, uninstall, and troubleshooting".length);
     expect(uninstallSectionStart).toBeGreaterThanOrEqual(0);

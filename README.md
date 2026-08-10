@@ -207,15 +207,23 @@ Assert-NativeSuccess 'bun run validate'
 Assert-NativeSuccess 'bun run release:check'
 & $bunCli run tag:check -- v0.6.0
 Assert-NativeSuccess 'bun run tag:check -- v0.6.0'
-git diff --check
+$gitCli = $null
+$gitCommand = Get-Command git -ErrorAction SilentlyContinue
+if ($gitCommand) { $gitCli = $gitCommand.Source }
+if (-not $gitCli) { throw 'No executable Git CLI was found. Stop.' }
+& $gitCli diff --check
 Assert-NativeSuccess 'git diff --check'
 ```
 
-To inspect one child rollout's observed metadata, use the bundled TypeScript
-inspector with its lowercase UUID:
+To inspect one child rollout's observed metadata, use the same verified PowerShell
+where `$bunCli` was resolved. Resolve the current checkout and run the bundled
+TypeScript inspector with its lowercase UUID:
 
 ```powershell
-bun plugins/sol-advisor/scripts/inspect-agent-runtime.ts <child-rollout-uuid>
+$repoRoot = (Resolve-Path -LiteralPath (Get-Location).Path).Path
+$runtimeInspector = Join-Path $repoRoot 'plugins\sol-advisor\scripts\inspect-agent-runtime.ts'
+& $bunCli $runtimeInspector '<child-rollout-uuid>'
+Assert-NativeSuccess 'Bun runtime inspector'
 ```
 
 It reports the role, model, reasoning effort, sandbox policy, permission profile, and
