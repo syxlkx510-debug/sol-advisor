@@ -1,57 +1,78 @@
 ---
 name: setup
-description: "Run Sol Advisor's first-use or reconfiguration interview in the parent chat, validate exact client-native model choices, persist logical preferences, preview native adapter files, and install only after explicit confirmation."
+description: "Run Sol Advisor's Codex-only setup interview in the parent chat, save exact configured roles, preview the adapter, and install only after exact confirmation."
 ---
 
 # Sol Advisor setup
 
-Run this interview in the parent/main chat. Never delegate it. Orchestration must call
-`get_setup_status` before doing anything else and route here when status is `missing`,
-`schema-old`, or `corrupt`. Plugin installation does not run this interview and does
-not install a hook; setup is lazy on the first orchestration invocation.
+Run this interview in the parent/main chat. Never delegate it. Orchestration calls
+`get_setup_status` before routing and runs this interview when the status is `missing`,
+`schema-old`, or `corrupt`. Plugin installation does not run setup or install an
+adapter; setup is lazy on the first orchestration invocation.
 
-Ask one focused question at a time:
+Ask one focused question at a time. The setup sequence is exactly these 11 steps;
+do not add a client-selection, compatibility, or automatic-route step.
 
-1. Client: `codex`, `cursor`, `vscode`, `github-copilot`, or `kiro`.
-2. Scope: `project` or `user`. Explain that user scope needs separate consent.
-3. Ask for the explicit existing workspace directory used to key this profile and to
-   compute allowlisted adapter destinations.
-4. Ask the user to open the client's model picker or `/model` and copy the **exact
-   native model ID** for routine implementation, high-complexity implementation, and
-   advisor. Never enumerate, normalize, guess, or silently substitute model IDs.
-5. Where supported, ask for the exact native reasoning setting. Codex and Cursor may
-   store per-role effort. VS Code/GitHub Copilot adapters store model only; explain
-   the parent cost-tier constraint. Kiro effort is session/per-model, not per-agent.
-6. Confirm the advisor is requested as read-only. Explain that behavioral read-only
-   is not OS enforcement unless the client exposes sandbox evidence.
-7. Confirm fail-closed behavior: no fallback roles or models.
-8. Preserve the optional Codex app-task lane separately. Enable Luna / Max app tasks
-   only after explicit opt-in. The native routine role may use any exact
-   user-selected client-native model, including Luna.
-   Choosing Luna for routine does not enable or select the app-task lane. Neither
-   route is a fallback for the other.
+### 1. Scope and user-scope consent
 
-Offer these current Codex recommendations as editable defaults, not universal IDs:
+Ask whether the profile scope is `project` or `user`. Recommend `project`. If the
+user selects `user`, obtain separate explicit consent for user scope before continuing.
 
-- routine: `gpt-5.6-terra`, effort `high`
-- high: `gpt-5.6-terra`, effort `high`
-- advisor: `gpt-5.6-sol`, effort `high`, requested read-only
-- orchestrator: always `inherit`; recommend selecting Sol / High in the main chat
+### 2. Existing workspace
 
-Call `save_preferences` only after showing the complete logical preference object.
-Use no secrets. For an unsupported execution surface (ChatGPT Work web, Kiro web/mobile, or a
-skills-only client), do not claim or store a native profile: those surfaces are not in
-the client enum. Use parent-chat prompt guidance only and say role bindings are not
-enforceable there.
+Ask for the explicit existing workspace directory. Use it to key the saved profile and
+to compute the allowlisted adapter destination; never accept an arbitrary write path.
 
-For native adapter installation, require an explicit existing workspace directory.
-Call `render_client_adapter`, then show every exact destination, full content,
-warning, and confirmation token. Do not pass an arbitrary write path: only the
-workspace goes to the MCP server, which computes allowlisted destinations. Call
-`install_client_adapter` only after the user repeats the exact install token; user
-scope additionally requires the exact separate user-scope token. Never treat “yes”
-as either token.
+### 3. Exact Codex role preferences
 
-After install, tell the user to start a new chat or reload the client. Reconfiguration
-repeats the interview and exact preview. Uninstall first previews its managed files
-and exact token, then removes only the unchanged managed files after confirmation.
+Ask the user to copy from Codex the exact model ID and exact reasoning effort for
+`routine`, `high`, and `advisor`. Never enumerate, normalize, guess, or substitute
+these values. Confirm that the advisor is requested as read-only and explain that a
+behavioral request is not host-enforced isolation without observed sandbox evidence.
+Confirm fail-closed behavior: no fallback role, model, or effort.
+
+### 4. Optional explicit Luna / Max app-task availability
+
+Ask whether the user explicitly wants the separate Luna / Max app-task lane available
+for a future current request. The native routine role may use any exact saved model,
+including Luna. Choosing Luna for routine does not enable or select the app-task lane;
+model family does not select the execution lane.
+
+### 5. Complete Codex preference preview
+
+Show the complete proposed preference object, including `client: "codex"`, scope,
+workspace, all three exact role model/effort values, the advisor read-only request,
+and the separate Luna app-task availability decision. Use no secrets.
+
+### 6. Save preferences
+
+Call `save_preferences` only after the user accepts the complete preview. Stop if it
+rejects the data; do not write a substitute local configuration.
+
+### 7. Full adapter preview
+
+Call `render_client_adapter` with the saved workspace. Show every destination, full
+file content, warning, and confirmation token returned by the MCP tool.
+
+### 8. Exact installation token
+
+Require the user to repeat the exact installation token from the preview. For user
+scope, require the separate user-scope confirmation token as well when it is returned.
+Never treat a general affirmation as either exact token.
+
+### 9. Install the adapter
+
+Call `install_client_adapter` only with the exact returned token or tokens. The MCP
+server computes all destinations; setup never supplies a direct destination path.
+
+### 10. Validate current configuration
+
+Call `validate_configuration` for the saved workspace. Continue only when it reports
+valid configuration and `adapterStatus: "current"`; otherwise show the returned state
+and stop fail-closed.
+
+### 11. Restart and new task
+
+Tell the user to fully restart Codex and create a new task in the same workspace.
+Existing tasks can retain stale role discovery. Reconfiguration repeats this exact
+eleven-step interview.
