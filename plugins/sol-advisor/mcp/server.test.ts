@@ -4,6 +4,7 @@ import { dirname, join } from "node:path";
 import { homedir, tmpdir } from "node:os";
 import { __resetDataPinForTests, __setManifestWriteFaultForTests, callTool, handle, renderAdapter } from "./server";
 import * as server from "./server";
+import * as packagedVersion from "./version";
 import { __setWindowsAclReaderForTests } from "./private-directory";
 
 let root="", data="", workspace="";
@@ -14,6 +15,15 @@ beforeEach(()=>{setHomeResolverForTests();__resetDataPinForTests();__setWindowsA
 afterEach(()=>{__setManifestWriteFaultForTests(undefined);__setWindowsAclReaderForTests();__resetDataPinForTests();setHomeResolverForTests();delete process.env.PLUGIN_DATA;rmSync(root,{recursive:true,force:true});});
 
 describe("MCP protocol",()=>{
+ test("derives product version only from a valid packaged Codex manifest",()=>{
+  const productVersionFromManifest=(packagedVersion as any).productVersionFromManifest;
+  expect(productVersionFromManifest).toBeTypeOf("function");
+  expect(productVersionFromManifest({version:"0.6.0+codex.local-1"})).toBe("0.6.0");
+  for(const manifest of [null,[],{}, {version:undefined},{version:1},{version:"0.6.0+build.1"},{version:"01.6.0"},{version:"0.6.0+codex.BAD"}]){
+   let message="";try{productVersionFromManifest(manifest);}catch(error){message=error instanceof Error?error.message:String(error);}
+   expect(message).toBe("invalid Codex plugin manifest");
+  }
+ });
  test("reports and saves the packaged Codex manifest base version",async()=>{
   const codexManifest=JSON.parse(readFileSync(join(import.meta.dir,"..",".codex-plugin","plugin.json"),"utf8"));
   const expectedProductVersion="0.6.0";

@@ -14,6 +14,12 @@ describe("Codex plugin version identity", () => {
     });
   });
 
+  test("uses the plugin-owned parser as the single implementation", async () => {
+    const packaged = await import("../plugins/sol-advisor/mcp/version");
+    expect(parseCodexVersion).toBe(packaged.parseCodexVersion);
+    expect(baseVersion).toBe(packaged.baseVersion);
+  });
+
   test("preserves a SemVer pre-release while separating its Codex cachebuster", () => {
     expect(parseCodexVersion("0.6.0-rc.1+codex.cache-2")).toEqual({
       base: "0.6.0-rc.1",
@@ -59,5 +65,15 @@ describe("Codex plugin version identity", () => {
     ]) {
       expect(() => parseCodexVersion(value)).toThrow();
     }
+  });
+
+  test("rejects an overlong base version before parsing it", () => {
+    const overlongBase = `1${"0".repeat(256)}.0.0`;
+    expect(() => parseCodexVersion(overlongBase)).toThrow("invalid version");
+  });
+
+  test("rejects an overlong Codex cachebuster before parsing it", () => {
+    const overlongCachebuster = `0.6.0+codex.${"a".repeat(257)}`;
+    expect(() => parseCodexVersion(overlongCachebuster)).toThrow("invalid version");
   });
 });

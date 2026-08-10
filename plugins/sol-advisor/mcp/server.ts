@@ -4,6 +4,7 @@ import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, renameSyn
 import { homedir } from "node:os";
 import { basename, dirname, isAbsolute, join, parse, relative, resolve, sep } from "node:path";
 import { assertPrivateDirectory } from "./private-directory";
+import { productVersionFromManifest } from "./version";
 
 export const CONFIG_SCHEMA_VERSION = 1;
 export const MANAGED_MARKER = "sol-advisor-managed:v1";
@@ -27,10 +28,13 @@ type ManagedFile = { profileKey: string; path: string; hash: string; backup?: st
 type Manifest = { schemaVersion: 1; files: ManagedFile[]; updatedAt: string };
 
 const pluginRoot = resolve(import.meta.dir, "..");
-const codexManifest = JSON.parse(
-  readFileSync(join(pluginRoot, ".codex-plugin", "plugin.json"), "utf8"),
-);
-export const PRODUCT_VERSION = String(codexManifest.version).split("+", 1)[0]!;
+let codexManifest: unknown;
+try {
+  codexManifest = JSON.parse(readFileSync(join(pluginRoot, ".codex-plugin", "plugin.json"), "utf8"));
+} catch {
+  throw new Error("invalid Codex plugin manifest");
+}
+export const PRODUCT_VERSION = productVersionFromManifest(codexManifest);
 let pinnedDataDir:{lexical:string;real:string;dev:number;ino:number}|undefined;
 export function __resetDataPinForTests(){pinnedDataDir=undefined;}
 let homeResolverForTests:(()=>string)|undefined;
