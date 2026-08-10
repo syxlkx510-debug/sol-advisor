@@ -1,4 +1,8 @@
-const basePattern = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/;
+const numericIdentifier = "(?:0|[1-9]\\d*)";
+const preReleaseIdentifier = `(?:${numericIdentifier}|\\d*[A-Za-z-][0-9A-Za-z-]*)`;
+const basePattern = new RegExp(
+  `^${numericIdentifier}\\.${numericIdentifier}\\.${numericIdentifier}(?:-${preReleaseIdentifier}(?:\\.${preReleaseIdentifier})*)?$`,
+);
 const cachePattern = /^[a-z0-9]+(?:[a-z0-9-]*[a-z0-9])?$/;
 
 export function parseCodexVersion(value: string): { base: string; cachebuster: string | null } {

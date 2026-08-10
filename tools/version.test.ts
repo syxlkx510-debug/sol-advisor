@@ -22,6 +22,26 @@ describe("Codex plugin version identity", () => {
     expect(baseVersion("0.6.0-rc.1+codex.cache-2")).toBe("0.6.0-rc.1");
   });
 
+  test("accepts strict SemVer pre-release identifiers", () => {
+    for (const value of ["0.6.0-0", "0.6.0-rc.1", "0.6.0-alpha-9.Z1"]) {
+      expect(parseCodexVersion(value)).toEqual({ base: value, cachebuster: null });
+    }
+  });
+
+  test("rejects non-canonical core and pre-release versions", () => {
+    for (const value of [
+      "01.6.0",
+      "0.06.0",
+      "0.6.00",
+      "0.6.0-rc..1",
+      "0.6.0-.rc",
+      "0.6.0-rc.",
+      "0.6.0-01",
+    ]) {
+      expect(() => parseCodexVersion(value)).toThrow();
+    }
+  });
+
   test("rejects malformed bases, non-Codex metadata, and repeated suffixes", () => {
     for (const value of ["0.6", "0.6.0+other.x", "0.6.0+codex.a+codex.b", "v0.6.0"]) {
       expect(() => parseCodexVersion(value)).toThrow();
