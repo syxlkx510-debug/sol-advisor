@@ -11,14 +11,11 @@ saved during setup.
 
 ## Prerequisites
 
-- Codex with plugin support and the Sol Advisor MCP tools enabled.
+- Codex with plugin support.
 - Bun 1.3.x on `PATH` for the MCP server and Windows verification commands.
 - A local checkout of this repository. The repository marketplace source is the
   `.agents/plugins/marketplace.json` file; its `sol-advisor` entry points to
   `plugins/sol-advisor`.
-
-Sol Advisor stores non-secret preferences in the private `PLUGIN_DATA` directory
-provided by Codex. It does not store credentials in that configuration.
 
 ## Install from the local repository marketplace
 
@@ -56,6 +53,11 @@ files.
 After installing or reinstalling, fully exit Codex, reopen the existing project, and
 create a new task. A new project is not required. The full exit releases any older
 MCP process, and the new task makes the newly installed skills and tools visible.
+The MCP setup tools become discoverable only after this install, the full exit/reopen,
+and the new task.
+
+Sol Advisor stores non-secret preferences in the private `PLUGIN_DATA` directory
+provided by Codex. It does not store credentials in that configuration.
 
 Start the workflow in the parent chat with:
 

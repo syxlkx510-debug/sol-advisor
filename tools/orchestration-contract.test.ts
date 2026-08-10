@@ -155,6 +155,28 @@ describe("Codex-only configured orchestration", () => {
 
   test("README exposes only the Codex install and configured-role path", () => {
     const readme = readFileSync(join(import.meta.dir, "..", "README.md"), "utf8");
+    const prerequisitesStart = readme.indexOf("## Prerequisites");
+    const prerequisitesEnd = readme.indexOf("\n## ", prerequisitesStart + "## Prerequisites".length);
+    expect(prerequisitesStart).toBeGreaterThanOrEqual(0);
+    expect(prerequisitesEnd).toBeGreaterThan(prerequisitesStart);
+    const prerequisites = readme.slice(prerequisitesStart, prerequisitesEnd);
+    expect(prerequisites).toMatch(/^- Codex with plugin support\.\s*$/m);
+    expect(prerequisites).toMatch(/^- Bun 1\.3\.x on `PATH`/m);
+    expect(prerequisites).toMatch(/^- A local checkout of this repository\./m);
+    expect(prerequisites.match(/^- /gm) ?? []).toHaveLength(3);
+    expect(prerequisites).not.toMatch(/MCP tools?\s+(?:enabled|available|present)/i);
+    expect(prerequisites).not.toMatch(/enabled.*MCP|MCP.*enabled/i);
+    expect(prerequisites).not.toContain("PLUGIN_DATA");
+    const preflight = readme.indexOf("codex --version");
+    const bunPreflight = readme.indexOf("bun --version");
+    const marketplaceInstall = readme.indexOf("codex plugin marketplace add $repoRoot");
+    const pluginInstall = readme.indexOf("codex plugin add sol-advisor@sol-advisor");
+    expect(preflight).toBeGreaterThan(prerequisitesEnd);
+    expect(bunPreflight).toBeGreaterThan(preflight);
+    expect(marketplaceInstall).toBeGreaterThan(bunPreflight);
+    expect(pluginInstall).toBeGreaterThan(marketplaceInstall);
+    expect(readme).toContain("$repoRoot = (Resolve-Path");
+    expect(readme).toContain("codex plugin marketplace add $repoRoot");
     expect(readme).toContain("codex plugin add sol-advisor@sol-advisor");
     expect(readme).toContain("sol_advisor_routine");
     expect(readme).toContain("sol_advisor_high");
