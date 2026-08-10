@@ -168,7 +168,7 @@ describe("Codex-only configured orchestration", () => {
     expect(prerequisites).not.toMatch(/enabled.*MCP|MCP.*enabled/i);
     expect(prerequisites).not.toContain("PLUGIN_DATA");
     const preflight = readme.indexOf("& $codexCli --version");
-    const bunPreflight = readme.indexOf("bun --version");
+    const bunPreflight = readme.indexOf("& $bunCli --version");
     const codexSupportPreflight = readme.indexOf("& $codexCli plugin --help");
     const marketplaceInstall = readme.indexOf("& $codexCli plugin marketplace add $repoRoot");
     const pluginInstall = readme.indexOf("& $codexCli plugin add sol-advisor@sol-advisor");
@@ -179,6 +179,49 @@ describe("Codex-only configured orchestration", () => {
     expect(marketplaceInstall).toBeGreaterThan(codexSupportPreflight);
     expect(pluginInstall).toBeGreaterThan(marketplaceInstall);
     expect(pluginRemove).toBeGreaterThan(pluginInstall);
+    const nativeChecked = (text: string, command: string) => {
+      const escaped = command.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      expect(text).toMatch(new RegExp(`${escaped}\\r?\\n\\s*Assert-NativeSuccess`));
+    };
+    expect(readme).toContain("function Assert-NativeSuccess");
+    nativeChecked(readme, "& $codexCli --version");
+    nativeChecked(readme, "& $codexCli plugin --help");
+    nativeChecked(readme, "& $codexCli plugin marketplace add $repoRoot");
+    nativeChecked(readme, "& $codexCli plugin remove sol-advisor@sol-advisor");
+    const pluginAddChecks = [...readme.matchAll(/& \$codexCli plugin add sol-advisor@sol-advisor\r?\n\s*Assert-NativeSuccess/g)];
+    expect(pluginAddChecks.length).toBeGreaterThanOrEqual(2);
+    const windowsStart = readme.indexOf("## Windows-native verification");
+    const windowsEnd = readme.indexOf("\n## Read-only reporting", windowsStart + "## Windows-native verification".length);
+    expect(windowsStart).toBeGreaterThanOrEqual(0);
+    expect(windowsEnd).toBeGreaterThan(windowsStart);
+    const windowsVerification = readme.slice(windowsStart, windowsEnd);
+    expect(windowsVerification).toContain("function Assert-NativeSuccess");
+    expect(windowsVerification).toContain("Get-Command bun");
+    expect(windowsVerification).toContain("$bunCli");
+    for (const command of [
+      "& $bunCli --version",
+      "& $bunCli install --frozen-lockfile",
+      "& $bunCli run test",
+      "& $bunCli run validate",
+      "& $bunCli run release:check",
+      "& $bunCli run tag:check -- v0.6.0",
+      "git diff --check",
+    ]) nativeChecked(windowsVerification, command);
+    expect(readme).not.toMatch(/^\s*bun\s+(?:install|run)\b/gm);
+    const uninstallSectionStart = readme.indexOf("## Reconfigure, uninstall, and troubleshooting");
+    const uninstallSectionEnd = readme.indexOf("\n## MCP tools", uninstallSectionStart + "## Reconfigure, uninstall, and troubleshooting".length);
+    expect(uninstallSectionStart).toBeGreaterThanOrEqual(0);
+    expect(uninstallSectionEnd).toBeGreaterThan(uninstallSectionStart);
+    const uninstallSection = readme.slice(uninstallSectionStart, uninstallSectionEnd);
+    const parentUninstall = uninstallSection.indexOf("uninstall_client_adapter");
+    const fullExit = uninstallSection.indexOf("Fully exit Codex");
+    const mcpEnded = uninstallSection.indexOf("active MCP");
+    const cliRemove = uninstallSection.indexOf("& $codexCli plugin remove sol-advisor@sol-advisor");
+    expect(parentUninstall).toBeGreaterThanOrEqual(0);
+    expect(fullExit).toBeGreaterThan(parentUninstall);
+    expect(mcpEnded).toBeGreaterThan(fullExit);
+    expect(cliRemove).toBeGreaterThan(mcpEnded);
+    expect(uninstallSection.replace(/\s+/g, " ")).toMatch(/do not run `plugin remove` while active codex or mcp is still running/i);
     expect(readme).toContain("Get-Command codex");
     expect(readme).toContain("Join-Path $env:LOCALAPPDATA 'OpenAI\\Codex\\bin'");
     expect(readme).toContain("Get-ChildItem");
@@ -205,7 +248,7 @@ describe("Codex-only configured orchestration", () => {
     expect(readme).toContain("workspace-write");
     expect(readme).toContain("& $codexCli --version");
     expect(readme).toContain("& $codexCli plugin --help");
-    expect(readme).toContain("bun --version");
+    expect(readme).toContain("& $bunCli --version");
     expect(readme).toContain("Access is denied");
     expect(readme).toContain("拒绝访问");
     expect(readme).toContain("WindowsApps");

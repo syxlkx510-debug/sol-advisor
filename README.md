@@ -25,6 +25,10 @@ for installation and resolve one executable Codex CLI. This checks the command o
 executable or changing `PATH`:
 
 ```powershell
+function Assert-NativeSuccess([string] $operation) {
+    if ($LASTEXITCODE -ne 0) { throw "$operation failed with exit code $LASTEXITCODE." }
+}
+
 $codexCli = $null
 $codexCommand = Get-Command codex -ErrorAction SilentlyContinue
 if ($codexCommand) {
@@ -57,10 +61,15 @@ if (-not $codexCli) {
     throw 'No executable Codex CLI with plugin support was found. Stop and repair Codex before continuing.'
 }
 & $codexCli --version
-if ($LASTEXITCODE -ne 0) { throw 'Codex --version failed; stop.' }
+Assert-NativeSuccess 'Codex --version'
 & $codexCli plugin --help
-if ($LASTEXITCODE -ne 0) { throw 'Codex plugin support preflight failed; stop.' }
-bun --version
+Assert-NativeSuccess 'Codex plugin --help'
+$bunCli = $null
+$bunCommand = Get-Command bun -ErrorAction SilentlyContinue
+if ($bunCommand) { $bunCli = $bunCommand.Source }
+if (-not $bunCli) { throw 'No executable Bun CLI was found. Stop.' }
+& $bunCli --version
+Assert-NativeSuccess 'Bun --version'
 ```
 
 The two real `$codexCli` preflight commands must start successfully and print their
@@ -78,7 +87,9 @@ dynamically:
 ```powershell
 $repoRoot = (Resolve-Path -LiteralPath (Get-Location).Path).Path
 & $codexCli plugin marketplace add $repoRoot
+Assert-NativeSuccess 'Codex plugin marketplace add'
 & $codexCli plugin add sol-advisor@sol-advisor
+Assert-NativeSuccess 'Codex plugin add'
 ```
 
 The marketplace command is needed once per Codex installation. The second command
@@ -176,12 +187,28 @@ From the repository root, these commands use Bun and work in PowerShell without 
 POSIX shell dependency:
 
 ```powershell
-bun install --frozen-lockfile
-bun run test
-bun run validate
-bun run release:check
-bun run tag:check -- v0.6.0
+function Assert-NativeSuccess([string] $operation) {
+    if ($LASTEXITCODE -ne 0) { throw "$operation failed with exit code $LASTEXITCODE." }
+}
+
+$bunCli = $null
+$bunCommand = Get-Command bun -ErrorAction SilentlyContinue
+if ($bunCommand) { $bunCli = $bunCommand.Source }
+if (-not $bunCli) { throw 'No executable Bun CLI was found. Stop.' }
+& $bunCli --version
+Assert-NativeSuccess 'Bun --version'
+& $bunCli install --frozen-lockfile
+Assert-NativeSuccess 'bun install --frozen-lockfile'
+& $bunCli run test
+Assert-NativeSuccess 'bun run test'
+& $bunCli run validate
+Assert-NativeSuccess 'bun run validate'
+& $bunCli run release:check
+Assert-NativeSuccess 'bun run release:check'
+& $bunCli run tag:check -- v0.6.0
+Assert-NativeSuccess 'bun run tag:check -- v0.6.0'
 git diff --check
+Assert-NativeSuccess 'git diff --check'
 ```
 
 To inspect one child rollout's observed metadata, use the bundled TypeScript
@@ -231,6 +258,7 @@ PowerShell that resolved `$codexCli`, reinstall from the same repository marketp
 
 ```powershell
 & $codexCli plugin add sol-advisor@sol-advisor
+Assert-NativeSuccess 'Codex plugin add (cachebuster reinstall)'
 ```
 
 Then fully exit Codex and create a new task. Do not hand-edit the marketplace file, the
@@ -246,19 +274,25 @@ Use $sol-advisor:setup to reconfigure the Codex scope, workspace, and exact role
 choices. Show the complete preview and wait for the exact installation token.
 ```
 
-Adapter removal is also preview-first. Call `uninstall_client_adapter`, inspect the
-managed paths and token, then repeat the exact token. It removes only unchanged files
-owned by the active profile; it does not remove user-owned files. In the same
-PowerShell that resolved `$codexCli`, remove the plugin only after its managed adapters
-are gone:
+Adapter removal and plugin removal are separate operations. Follow this order:
+
+1. In the still-running parent task, call `uninstall_client_adapter`, inspect the
+   managed paths and preview token, then repeat the exact token. It removes only
+   unchanged files owned by the active profile; it does not remove user-owned files.
+2. Fully exit Codex and confirm the Codex window and active MCP process have ended. Do
+   not run `plugin remove` while active Codex or MCP is still running.
+3. Open PowerShell after that exit. If you open a new terminal, repeat the CLI resolution and preflight
+   before running the checked remove command. In the same
+   PowerShell that resolved `$codexCli`, remove the plugin only after its managed
+   adapters are gone:
 
 ```powershell
 & $codexCli plugin remove sol-advisor@sol-advisor
+Assert-NativeSuccess 'Codex plugin remove'
 ```
 
-If you open a new terminal, repeat the CLI resolution and preflight before running the
-remove command. Do not delete user configuration, drifted adapter files, or the plugin
-cache manually.
+4. Optionally reopen Codex. Do not delete user configuration, drifted adapter files, or
+   the plugin cache manually.
 
 If the MCP tools are missing, confirm that the local marketplace points at this
 checkout, run the install command again, fully exit Codex, reopen the project, and
