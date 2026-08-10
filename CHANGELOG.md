@@ -7,14 +7,13 @@ All notable changes to Sol Advisor are documented here. This project follows
 
 ### Added
 
-- Cursor local-clone installation guide plus developer smoke-test procedure with guarded setup, evidence, and cleanup steps.
-- Guarded macOS TypeScript installer for Cursor's project-scoped local MCP compatibility bridge, including workspace-isolated data, receipt validation, concurrent-edit refusal, crash recovery, and lifecycle tests.
+- Codex-only 0.6.0 pending release with configured native routine, high, and advisor role adapters.
+- Fail-closed persistence, preview, installation, recovery, and runtime-evidence checks for the native role configuration.
 
-### Fixed
+### Changed
 
-- Cursor 3.15.6 local installation now uses a verified directory copy instead of an externally resolved symlink.
-- Replaced the ineffective GUI `PATH` relaunch workaround with a project-native MCP bridge after live testing showed Cursor's plugin MCP process cannot resolve the canonical bare `bun` command.
-- Documented Cursor 3.15.6's independent Customize workspace selector, repeated source-consent boundary, and full-process restart fallback when a window reload leaves the shared MCP process disconnected.
+- Each configured native role now requires an exact non-empty model and `model_reasoning_effort` identifier before it can be saved or rendered.
+- The parent orchestrator continues to inherit the parent chat selection; its optional recommendation effort is not a configured native role requirement.
 
 ## [0.5.0] - 2026-08-07
 

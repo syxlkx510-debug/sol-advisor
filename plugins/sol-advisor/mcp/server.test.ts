@@ -84,8 +84,37 @@ describe("configuration",()=>{
    for(const client of ["cursor","vscode","github-copilot","kiro"])await expect(callTool("save_preferences",{...base(),client})).rejects.toThrow("client must be codex");
    const blank:any=base();blank.roles.high.model="";await expect(callTool("save_preferences",blank)).rejects.toThrow("exact");
    await expect(callTool("get_setup_status",{extra:true})).rejects.toThrow("unknown");
- });
- test("keeps the explicit Luna task lane and rejects activation routing",async()=>{
+  });
+  test("requires an exact native effort for every configured role without requiring an orchestrator recommendation effort",async()=>{
+   const saved:any=await callTool("save_preferences",base());
+   for(const role of ["routine","high","advisor"] as const){
+    const missing:any=structuredClone(saved.preferences);delete missing.roles[role].effort;
+    expect((server as any).validatePreferences(missing)).toContain(`roles.${role}.effort must be an exact, non-empty client-native identifier`);
+    const input:any=base();delete input.roles[role].effort;
+    await expect(callTool("save_preferences",input)).rejects.toThrow(`roles.${role}.effort must be an exact, non-empty client-native identifier`);
+   }
+   for(const effort of ["","   ","xhigh\u0001"]){
+    const invalid:any=structuredClone(saved.preferences);invalid.roles.high.effort=effort;
+    expect((server as any).validatePreferences(invalid)).toContain("roles.high.effort must be an exact, non-empty client-native identifier");
+    const input:any=base();input.roles.high.effort=effort;
+    await expect(callTool("save_preferences",input)).rejects.toThrow("roles.high.effort must be an exact, non-empty client-native identifier");
+   }
+   const noRecommendationEffort:any=structuredClone(saved.preferences);delete noRecommendationEffort.orchestrator.recommendation.effort;
+   expect((server as any).validatePreferences(noRecommendationEffort)).toEqual([]);
+   const input:any=base();delete input.orchestrator.recommendation.effort;
+   await expect(callTool("save_preferences",input)).resolves.toMatchObject({saved:true});
+  });
+  test("treats a persisted profile missing a configured role effort as corrupt",async()=>{
+   await callTool("save_preferences",base());const path=join(data,"config.json"),stored=JSON.parse(readFileSync(path,"utf8"));delete stored.profiles[stored.activeProfile].roles.advisor.effort;writeFileSync(path,JSON.stringify(stored));
+   expect((await callTool("get_setup_status") as any).status).toBe("corrupt");await expect(callTool("get_preferences")).rejects.toThrow("corrupt");
+  });
+  test("requires exact model and effort fields in every save_preferences role schema",()=>{
+   const savePreferences=(server as any).tools.find((tool:any)=>tool.name==="save_preferences");
+   for(const role of ["routine","high","advisor"]){
+    expect(savePreferences.inputSchema.properties.roles.properties[role].required).toEqual(["model","effort"]);
+   }
+  });
+  test("keeps the explicit Luna task lane and rejects activation routing",async()=>{
   const saved:any=await callTool("save_preferences",{...base(),appTaskLane:{enabled:true}});
   expect(saved.preferences.appTaskLane).toEqual({enabled:true,model:"gpt-5.6-luna",effort:"max"});
   expect((await callTool("get_preferences") as any).appTaskLane).toEqual({enabled:true,model:"gpt-5.6-luna",effort:"max"});
@@ -132,9 +161,10 @@ describe("adapter rendering and lifecycle",()=>{
    {role:"routine",path:join(workspacePath,".codex","agents","sol-advisor-routine.toml"),content:'# sol-advisor-managed:v1\nname = "sol_advisor_routine"\ndescription = "Sol Advisor routine role"\nmodel = "gpt-5.6-luna"\nmodel_reasoning_effort = "max"\ndeveloper_instructions = "Implement bounded, well-specified, mechanical work. Preserve the settled architecture, owned files, interfaces, and concurrent edits. Run requested checks and report evidence."\n'},
    {role:"high",path:join(workspacePath,".codex","agents","sol-advisor-high.toml"),content:'# sol-advisor-managed:v1\nname = "sol_advisor_high"\ndescription = "Sol Advisor high role"\nmodel = "gpt-5.6-terra"\nmodel_reasoning_effort = "xhigh"\ndeveloper_instructions = "Implement complex, security-sensitive, algorithmic, debugging, or wide-blast-radius work within the settled architecture. Surface ambiguity, preserve concurrent edits, and report verification evidence."\n'},
    {role:"advisor",path:join(workspacePath,".codex","agents","sol-advisor-advisor.toml"),content:'# sol-advisor-managed:v1\nname = "sol_advisor_advisor"\ndescription = "Sol Advisor advisor role"\nmodel = "gpt-5.6-sol"\nmodel_reasoning_effort = "xhigh"\nsandbox_mode = "read-only"\ndeveloper_instructions = "Review the architecture, specification, actual diff, and verification evidence. Remain behaviorally read-only. Return ship, fix-first, or rethink; never implement fixes."\n'},
-  ]);
-  expect(preview.warnings).toEqual([]);
- });
+   ]);
+   for(const file of preview.files)expect(file.content).toContain("model_reasoning_effort");
+   expect(preview.warnings).toEqual([]);
+  });
  test("validate_configuration returns a non-installable inspection preview",async()=>{
   await callTool("save_preferences",base());const inspected:any=await callTool("validate_configuration",{workspace});
   expect(inspected.preview.confirmationToken).toBeUndefined();expect(inspected.preview.userScopeConfirmationToken).toBeUndefined();expect(inspected.preview.expiresAt).toBeUndefined();

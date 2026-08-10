@@ -15,7 +15,7 @@ export const CLIENT = "codex" as const;
 export type Client = typeof CLIENT;
 export type Scope = "project" | "user";
 export type RoleName = "routine" | "high" | "advisor";
-export type RolePreference = { model: string; effort?: string; readonly?: boolean };
+export type RolePreference = { model: string; effort: string; readonly?: boolean };
 export type Preferences = {
   schemaVersion: 1; client: Client; scope: Scope;
   orchestrator: { model: "inherit"; recommendation?: { model: string; effort?: string } };
@@ -78,7 +78,7 @@ function configState(): { status: "missing"|"ready"|"schema-old"|"corrupt"; pref
   } catch (error) { return { status: "corrupt", detail: String(error) }; }
 }
 function exactString(v: unknown, field: string, errors: string[]) {
-  if (typeof v !== "string" || !v.trim() || v !== v.trim() || /[\r\n\0]/.test(v)) errors.push(`${field} must be an exact, non-empty client-native identifier`);
+  if (typeof v !== "string" || !v.trim() || v !== v.trim() || /\p{Cc}/u.test(v)) errors.push(`${field} must be an exact, non-empty client-native identifier`);
 }
 export function validatePreferences(value: any): string[] {
   const errors: string[] = [];
@@ -97,7 +97,7 @@ export function validatePreferences(value: any): string[] {
     const r = value.roles?.[role];
     if (!r || typeof r !== "object") { errors.push(`roles.${role} is required`); continue; }
     exactString(r.model, `roles.${role}.model`, errors);
-    if (r.effort !== undefined) exactString(r.effort, `roles.${role}.effort`, errors);
+    exactString(r.effort, `roles.${role}.effort`, errors);
   }
   if (value.roles?.advisor?.readonly !== true) errors.push("advisor readonly preference must be true");
   if(typeof value.profileKey!=="string"||!value.profileKey.startsWith("codex:")||typeof value.workspace!=="string"||!isAbsolute(value.workspace)) errors.push("Codex profileKey and absolute workspace are required");
@@ -132,7 +132,7 @@ const roleFiles: Record<RoleName,string> = { routine:"sol-advisor-routine.toml",
 function renderOne(role: RoleName, pref: RolePreference): string {
   const marker = `# ${MANAGED_MARKER}`;
   const body = instructions(role);
-  return `${marker}\nname = "sol_advisor_${role}"\ndescription = "Sol Advisor ${role} role"\nmodel = ${JSON.stringify(pref.model)}\n${pref.effort ? `model_reasoning_effort = ${JSON.stringify(pref.effort)}\n` : ""}${role === "advisor" ? 'sandbox_mode = "read-only"\n' : ""}developer_instructions = ${JSON.stringify(body)}\n`;
+  return `${marker}\nname = "sol_advisor_${role}"\ndescription = "Sol Advisor ${role} role"\nmodel = ${JSON.stringify(pref.model)}\nmodel_reasoning_effort = ${JSON.stringify(pref.effort)}\n${role === "advisor" ? 'sandbox_mode = "read-only"\n' : ""}developer_instructions = ${JSON.stringify(body)}\n`;
 }
 export function renderAdapter(preferences: Preferences, workspaceInput: string, options:{registerPreview?:boolean}={}) {
   const errors = validatePreferences(preferences); if (errors.length) throw new Error(errors.join("; "));
@@ -257,7 +257,7 @@ function savePreferences(args:any) {
   rejectUnknown(args.appTaskLane,["enabled"],"appTaskLane");
   const now=new Date().toISOString(), existing=configState(), workspace=safeWorkspace(args.workspace);
   const profileKey=`${args.client}:${args.scope}:${workspace}`;
-  const candidate:any={schemaVersion:1,client:args.client,scope:args.scope,orchestrator:{model:"inherit",...(args.orchestrator?.recommendation?{recommendation:{model:args.orchestrator.recommendation.model,...(args.orchestrator.recommendation.effort!==undefined?{effort:args.orchestrator.recommendation.effort}:{})}}:{})},roles:{routine:{model:args.roles?.routine?.model,...(args.roles?.routine?.effort!==undefined?{effort:args.roles.routine.effort}:{}),...(args.roles?.routine?.readonly!==undefined?{readonly:args.roles.routine.readonly}:{})},high:{model:args.roles?.high?.model,...(args.roles?.high?.effort!==undefined?{effort:args.roles.high.effort}:{}),...(args.roles?.high?.readonly!==undefined?{readonly:args.roles.high.readonly}:{})},advisor:{model:args.roles?.advisor?.model,...(args.roles?.advisor?.effort!==undefined?{effort:args.roles.advisor.effort}:{}),readonly:true}},fallbackPolicy:"fail-closed",fallbacks:[],...(args.appTaskLane?.enabled===true?{appTaskLane:{enabled:true,model:"gpt-5.6-luna",effort:"max"}}:{}),profileKey,workspace,createdAt:existing.preferences?.profileKey===profileKey?existing.preferences.createdAt:now,updatedAt:now,pluginVersion:PRODUCT_VERSION};
+  const candidate:any={schemaVersion:1,client:args.client,scope:args.scope,orchestrator:{model:"inherit",...(args.orchestrator?.recommendation?{recommendation:{model:args.orchestrator.recommendation.model,...(args.orchestrator.recommendation.effort!==undefined?{effort:args.orchestrator.recommendation.effort}:{})}}:{})},roles:{routine:{model:args.roles?.routine?.model,effort:args.roles?.routine?.effort,...(args.roles?.routine?.readonly!==undefined?{readonly:args.roles.routine.readonly}:{})},high:{model:args.roles?.high?.model,effort:args.roles?.high?.effort,...(args.roles?.high?.readonly!==undefined?{readonly:args.roles.high.readonly}:{})},advisor:{model:args.roles?.advisor?.model,effort:args.roles?.advisor?.effort,readonly:true}},fallbackPolicy:"fail-closed",fallbacks:[],...(args.appTaskLane?.enabled===true?{appTaskLane:{enabled:true,model:"gpt-5.6-luna",effort:"max"}}:{}),profileKey,workspace,createdAt:existing.preferences?.profileKey===profileKey?existing.preferences.createdAt:now,updatedAt:now,pluginVersion:PRODUCT_VERSION};
   const errors=validatePreferences(candidate); if(errors.length) throw new Error(errors.join("; "));
   if(existsSync(configPath())) { const privateBackups=backupDir(),backup=join(privateBackups,`${Date.now()}-config.json.bak`);if(dirname(backup)!==backupDir())throw new Error("config backup destination changed");copyFileSync(configPath(),backup);chmodSync(backup,0o600);syncFile(backup);syncDir(privateBackups); }
   let profiles:Record<string,Preferences>={}; try { const old:any=readJson(configPath()); if(old?.schemaVersion===1&&old.profiles&&typeof old.profiles==="object") profiles=old.profiles; } catch {}
@@ -266,7 +266,7 @@ function savePreferences(args:any) {
 function resetConfiguration(args:any) { const live=loadManifest().files; if(live.length) throw new Error("reset refused while managed adapter files are installed; uninstall them first"); const token="RESET SOL ADVISOR CONFIGURATION"; if(args.confirmationToken!==token) return {requiresConfirmation:true,confirmationToken:token}; for(const path of [configPath(),manifestPath(),join(dataDir(),"backups")]) if(existsSync(path)) rmSync(path,{recursive:true,force:true}); previewPlans.clear(); return {reset:true,purged:true}; }
 const objectSchema=(properties:Record<string,unknown>={},required:string[]=[])=>({type:"object",properties,required,additionalProperties:false});
 const str={type:"string"};
-const roleSchema={type:"object",properties:{model:str,effort:str,readonly:{type:"boolean"}},required:["model"],additionalProperties:false};
+const roleSchema={type:"object",properties:{model:str,effort:str,readonly:{type:"boolean"}},required:["model","effort"],additionalProperties:false};
 export const tools = [
   {name:"get_setup_status",description:"Report missing, ready, schema-old, or corrupt setup state",inputSchema:objectSchema()},
   {name:"get_preferences",description:"Read non-secret logical preferences",inputSchema:objectSchema()},

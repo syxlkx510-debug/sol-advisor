@@ -51,6 +51,22 @@ const historicalGuidance = [
 ] as const;
 
 describe("Codex-only configured orchestration", () => {
+  test("describes only the pending Codex-only 0.6.0 release in Unreleased", () => {
+    const changelog = readFileSync(join(import.meta.dir, "..", "CHANGELOG.md"), "utf8");
+    const start = changelog.indexOf("## [Unreleased]");
+    const end = changelog.indexOf("\n## [", start + "## [Unreleased]".length);
+    expect(start).toBeGreaterThanOrEqual(0);
+    expect(end).toBeGreaterThan(start);
+    const unreleased = changelog.slice(start, end);
+    expect(unreleased).toContain("Codex-only");
+    expect(unreleased).toContain("0.6.0");
+    expect(unreleased).toContain("model_reasoning_effort");
+    for (const removed of [
+      "Cursor", "VS Code", "Copilot", "Kiro", "portable", "compatibility roles",
+      "compatibility bridge", "local MCP", "automatic visual Luna",
+    ]) expect(unreleased.toLowerCase()).not.toContain(removed.toLowerCase());
+  });
+
   test("contains only configured native role names", () => {
     const skill = read("skills", "orchestration", "SKILL.md");
     const contracts = read("skills", "orchestration", "references", "role-contracts.md");
