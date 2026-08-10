@@ -22,11 +22,29 @@ provided by Codex. It does not store credentials in that configuration.
 
 ## Install from the local repository marketplace
 
-Run these commands in PowerShell from the repository checkout (replace the path if
-the checkout is elsewhere):
+Before either marketplace command, use the same PowerShell window that you will use
+for installation and run this executable preflight:
 
 ```powershell
-codex plugin marketplace add G:\Codex_Projects\sol-advisor
+codex --version
+# If this build does not support --version, use: codex --help
+bun --version
+```
+
+Both commands must start successfully and print their version/help output. If Codex
+returns `Access is denied`, `拒绝访问`, `Access denied`, reports that it cannot be
+found, or otherwise cannot execute, stop immediately. Do not run the marketplace or
+plugin install commands, copy a WindowsApps executable, or hand-edit the Codex cache
+or configuration. Switch to a user terminal where the Codex CLI executes, or have the
+Codex app/administrator repair the CLI executable, then repeat this preflight before
+continuing.
+
+After the preflight, stay in the repository root and resolve the current checkout
+dynamically:
+
+```powershell
+$repoRoot = (Resolve-Path -LiteralPath (Get-Location).Path).Path
+codex plugin marketplace add $repoRoot
 codex plugin add sol-advisor@sol-advisor
 ```
 
@@ -159,16 +177,22 @@ runtime metadata.
 ## Development cachebuster
 
 The Codex manifest has a release base version and may carry one local cachebuster. In
-development, change that cache identity only through the plugin-creator helper:
+development, ask Codex explicitly:
 
-```powershell
-python C:\Users\SYX001\.codex\skills\.system\plugin-creator\scripts\update_plugin_cachebuster.py G:\Codex_Projects\sol-advisor\plugins\sol-advisor
+```text
+Use `$plugin-creator` to run `scripts/update_plugin_cachebuster.py` for the current
+checkout's `plugins/sol-advisor`. Resolve the plugin-creator skill root and an
+available runtime first; do not hand-edit the manifest, marketplace, or cache.
 ```
 
-Then rerun the version/discovery checks, reinstall with
-`codex plugin add sol-advisor@sol-advisor`, fully exit Codex, and create a new task.
-Do not hand-edit the marketplace file, the installed plugin cache, or the manifest's
-cachebuster. Do not force-delete a cache directory to make a new version appear.
+The skill resolves its own helper path and runtime. If it cannot resolve them, stop
+and report that instead of editing the manifest manually.
+
+After the helper succeeds, rerun the version/discovery checks, reinstall from the same
+repository marketplace with `codex plugin add sol-advisor@sol-advisor`, fully exit
+Codex, and create a new task. Do not hand-edit the marketplace file, the installed
+plugin cache, or the manifest's cachebuster. Do not force-delete a cache directory to
+make a new version appear.
 
 ## Reconfigure, uninstall, and troubleshooting
 

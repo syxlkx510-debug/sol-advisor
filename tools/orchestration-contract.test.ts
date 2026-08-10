@@ -165,6 +165,19 @@ describe("Codex-only configured orchestration", () => {
     expect(readme).toContain("app-task lane");
     expect(readme).toContain("behaviorally read-only");
     expect(readme).toContain("workspace-write");
+    expect(readme).toContain("codex --version");
+    expect(readme).toContain("bun --version");
+    expect(readme).toContain("Access is denied");
+    expect(readme).toContain("拒绝访问");
+    expect(readme).toContain("WindowsApps");
+    expect(readme).toContain("stop immediately");
+    expect(readme).toContain("$plugin-creator");
+    expect(readme).toContain("scripts/update_plugin_cachebuster.py");
+    expect(readme).toContain("current checkout");
+    expect(readme).toContain("codex plugin marketplace add");
+    expect(readme).not.toMatch(/[A-Z]:\\Users\\/i);
+    expect(readme).not.toMatch(/[A-Z]:\\Codex_Projects\\/i);
+    expect(readme).not.toMatch(/\bpython(?:3)?(?:\.exe)?\b/i);
     for (const removed of [
       "Cursor", "VS Code", "GitHub Copilot", "Kiro",
       "portable Agent Plugins", "sol_advisor_terra_implementer", "sol_advisor_sol_reviewer",
