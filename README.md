@@ -20,29 +20,65 @@ saved during setup.
 ## Install from the local repository marketplace
 
 Before either marketplace command, use the same PowerShell window that you will use
-for installation and run this executable preflight:
+for installation and resolve one executable Codex CLI. This checks the command on
+`PATH` first; if it cannot run, it checks the bundled candidates without copying an
+executable or changing `PATH`:
 
 ```powershell
-codex --version
-# If this build does not support --version, use: codex --help
+$codexCli = $null
+$codexCommand = Get-Command codex -ErrorAction SilentlyContinue
+if ($codexCommand) {
+    $probeExitCode = 1
+    try {
+        & $codexCommand.Source plugin --help *> $null
+        $probeExitCode = $LASTEXITCODE
+    } catch {}
+    if ($probeExitCode -eq 0) { $codexCli = $codexCommand.Source }
+}
+if (-not $codexCli) {
+    $codexBinRoot = Join-Path $env:LOCALAPPDATA 'OpenAI\Codex\bin'
+    $bundledCandidates = @(
+        Get-ChildItem -LiteralPath $codexBinRoot -Filter 'codex.exe' -Recurse -File -ErrorAction SilentlyContinue |
+            Sort-Object LastWriteTime -Descending
+    )
+    foreach ($candidate in $bundledCandidates) {
+        $probeExitCode = 1
+        try {
+            & $candidate.FullName plugin --help *> $null
+            $probeExitCode = $LASTEXITCODE
+        } catch {}
+        if ($probeExitCode -eq 0) {
+            $codexCli = $candidate.FullName
+            break
+        }
+    }
+}
+if (-not $codexCli) {
+    throw 'No executable Codex CLI with plugin support was found. Stop and repair Codex before continuing.'
+}
+& $codexCli --version
+if ($LASTEXITCODE -ne 0) { throw 'Codex --version failed; stop.' }
+& $codexCli plugin --help
+if ($LASTEXITCODE -ne 0) { throw 'Codex plugin support preflight failed; stop.' }
 bun --version
 ```
 
-Both commands must start successfully and print their version/help output. If Codex
-returns `Access is denied`, `拒绝访问`, `Access denied`, reports that it cannot be
-found, or otherwise cannot execute, stop immediately. Do not run the marketplace or
-plugin install commands, copy a WindowsApps executable, or hand-edit the Codex cache
-or configuration. Switch to a user terminal where the Codex CLI executes, or have the
-Codex app/administrator repair the CLI executable, then repeat this preflight before
-continuing.
+The two real `$codexCli` preflight commands must start successfully and print their
+output. If `Get-Command codex` returns `Access is denied`, `拒绝访问`, `Access denied`,
+reports that it cannot be found, or otherwise cannot execute, the resolver clears it
+and tries the bundled candidates one at a time. If all candidates fail, stop immediately.
+Do not run marketplace or plugin installation, copy a WindowsApps
+executable, edit `PATH`, or hand-edit the Codex cache/configuration. Switch to a user
+terminal where the Codex CLI executes, or have the Codex app/administrator repair the
+CLI executable, then repeat this resolution and preflight.
 
 After the preflight, stay in the repository root and resolve the current checkout
 dynamically:
 
 ```powershell
 $repoRoot = (Resolve-Path -LiteralPath (Get-Location).Path).Path
-codex plugin marketplace add $repoRoot
-codex plugin add sol-advisor@sol-advisor
+& $codexCli plugin marketplace add $repoRoot
+& $codexCli plugin add sol-advisor@sol-advisor
 ```
 
 The marketplace command is needed once per Codex installation. The second command
@@ -190,11 +226,16 @@ available runtime first; do not hand-edit the manifest, marketplace, or cache.
 The skill resolves its own helper path and runtime. If it cannot resolve them, stop
 and report that instead of editing the manifest manually.
 
-After the helper succeeds, rerun the version/discovery checks, reinstall from the same
-repository marketplace with `codex plugin add sol-advisor@sol-advisor`, fully exit
-Codex, and create a new task. Do not hand-edit the marketplace file, the installed
-plugin cache, or the manifest's cachebuster. Do not force-delete a cache directory to
-make a new version appear.
+After the helper succeeds, rerun the version/discovery checks and, in the same
+PowerShell that resolved `$codexCli`, reinstall from the same repository marketplace:
+
+```powershell
+& $codexCli plugin add sol-advisor@sol-advisor
+```
+
+Then fully exit Codex and create a new task. Do not hand-edit the marketplace file, the
+installed plugin cache, or the manifest's cachebuster. Do not force-delete a cache
+directory to make a new version appear.
 
 ## Reconfigure, uninstall, and troubleshooting
 
@@ -207,8 +248,17 @@ choices. Show the complete preview and wait for the exact installation token.
 
 Adapter removal is also preview-first. Call `uninstall_client_adapter`, inspect the
 managed paths and token, then repeat the exact token. It removes only unchanged files
-owned by the active profile; it does not remove user-owned files. Remove the plugin
-through Codex's plugin manager only after its managed adapters are gone.
+owned by the active profile; it does not remove user-owned files. In the same
+PowerShell that resolved `$codexCli`, remove the plugin only after its managed adapters
+are gone:
+
+```powershell
+& $codexCli plugin remove sol-advisor@sol-advisor
+```
+
+If you open a new terminal, repeat the CLI resolution and preflight before running the
+remove command. Do not delete user configuration, drifted adapter files, or the plugin
+cache manually.
 
 If the MCP tools are missing, confirm that the local marketplace points at this
 checkout, run the install command again, fully exit Codex, reopen the project, and
