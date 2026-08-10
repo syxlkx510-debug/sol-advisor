@@ -1,5 +1,6 @@
 import {
   existsSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -112,6 +113,41 @@ function expectRuntimeFailure(result: ReturnType<typeof Bun.spawnSync>) {
 
 function createDirectoryLink(target: string, link: string): void {
   symlinkSync(target, link, process.platform === "win32" ? "junction" : "dir");
+}
+
+function runStableReadMutation(
+  root: string,
+  threadId: string,
+  mutation: "append" | "overwrite",
+) {
+  const mutationSource = mutation === "append"
+    ? 'appendFileSync(candidate, "DO_NOT_LEAK_APPEND_CONTENT", "utf8");'
+    : [
+      'const descriptor = openSync(candidate, "r+");',
+      "try {",
+      '  const replacement = Buffer.from("DO_NOT_LEAK_SAME_SIZE");',
+      "  writeSync(descriptor, replacement, 0, replacement.length, 0);",
+      "} finally {",
+      "  closeSync(descriptor);",
+      "}",
+    ].join("\n");
+  const source = [
+    'import { appendFileSync, closeSync, openSync, writeSync } from "node:fs";',
+    `import { inspectRuntime } from ${JSON.stringify(pathToFileURL(runtimeInspector).href)};`,
+    "try {",
+    `  inspectRuntime(${JSON.stringify(root)}, ${JSON.stringify(threadId)}, {`,
+    "    testHooks: {",
+    "      afterFirstRead(candidate) {",
+    mutationSource,
+    "      },",
+    "    },",
+    "  });",
+    "} catch (error) {",
+    '  process.stderr.write("ERROR: " + (error instanceof Error ? error.message : "runtime inspection failed.") + "\\n");',
+    "  process.exitCode = 1;",
+    "}",
+  ].join("\n");
+  return Bun.spawnSync([process.execPath, "-e", source]);
 }
 
 describe("Codex-only plugin discovery", () => {
@@ -359,12 +395,48 @@ describe("native runtime inspector", () => {
       {
         testHooks: {
           beforeOpen(candidate) {
+            const originalSize = lstatSync(candidate).size;
             renameSync(candidate, `${candidate}.original`);
-            writeFileSync(candidate, "DO_NOT_LEAK_REPLACED_CONTENT\n", "utf8");
+            writeFileSync(
+              candidate,
+              "DO_NOT_LEAK_REPLACED_CONTENT".padEnd(originalSize, "x").slice(0, originalSize),
+              "utf8",
+            );
           },
         },
       },
-    )).toThrow("matched rollout changed during inspection.");
+    )).toThrow("rollout changed during inspection.");
+  });
+
+  for (const mutation of ["append", "overwrite"] as const) {
+    test(`rejects a rollout ${mutation}ed after its first bounded read without leaking content`, () => {
+      const threadId = "19191919-1919-7191-8191-191919191919";
+      withFixture((root, day) => {
+        writeRollout(day, `rollout-2026-08-09T00-00-00-${threadId}.jsonl`, completeRollout(threadId));
+        const result = runStableReadMutation(root, threadId, mutation);
+        expect(result.exitCode).toBe(1);
+        expect(result.stdout.toString()).toBe("");
+        expect(result.stderr.toString()).toBe("ERROR: rollout changed during inspection.\n");
+        expect(result.stderr.toString()).not.toContain("DO_NOT_LEAK");
+      });
+    });
+  }
+
+  test("fails closed when the verified rollout cannot be closed", () => {
+    const threadId = "20202020-2020-7202-8202-202020202020";
+    expect(() => inspectRuntimeFixture(
+      threadId,
+      (_root, day) => {
+        writeRollout(day, `rollout-2026-08-09T00-00-00-${threadId}.jsonl`, completeRollout(threadId));
+      },
+      {
+        testHooks: {
+          close() {
+            throw new Error("DO_NOT_LEAK_CLOSE_FAILURE");
+          },
+        },
+      },
+    )).toThrow("could not close verified rollout.");
   });
 
   for (const kind of ["sparse", "filled"] as const) {

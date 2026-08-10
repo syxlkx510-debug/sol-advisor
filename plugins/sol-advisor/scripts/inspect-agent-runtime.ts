@@ -8,7 +8,7 @@ import {
   realpathSync,
   statSync,
   type Dirent,
-  type Stats,
+  type BigIntStats,
 } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
@@ -43,6 +43,8 @@ export type RuntimeInspectionOptions = {
   /** Test-only hook. It is never reachable from the CLI. */
   testHooks?: {
     beforeOpen?: (candidatePath: string) => void;
+    afterFirstRead?: (candidatePath: string) => void;
+    close?: (descriptor: number) => void;
   };
 };
 
@@ -56,11 +58,15 @@ const ENTRY_LIMIT_EXCEEDED =
 const ROLLOUT_TOO_LARGE = "matched rollout exceeds the maximum size.";
 const LINE_TOO_LARGE = "rollout contains a line exceeding the maximum size.";
 const RECORD_LIMIT_EXCEEDED = "rollout exceeds the record limit.";
-const CANDIDATE_CHANGED = "matched rollout changed during inspection.";
+const CANDIDATE_CHANGED = "rollout changed during inspection.";
+const CLOSE_FAILED = "could not close verified rollout.";
 
 class RuntimeInspectionError extends Error {}
 
-type FileIdentity = Pick<Stats, "dev" | "ino" | "size">;
+type FileIdentity = Pick<
+  BigIntStats,
+  "dev" | "ino" | "size" | "mtimeNs" | "ctimeNs"
+>;
 
 type ParsedRollout = {
   sessions: Record<string, unknown>[];
@@ -241,8 +247,36 @@ function sameFileIdentity(first: FileIdentity, second: FileIdentity): boolean {
   return (
     first.dev === second.dev &&
     first.ino === second.ino &&
-    first.size === second.size
+    first.size === second.size &&
+    first.mtimeNs === second.mtimeNs &&
+    first.ctimeNs === second.ctimeNs
   );
+}
+
+function readExact(descriptor: number, byteLength: number): Buffer {
+  const contents = Buffer.alloc(byteLength);
+  let offset = 0;
+  while (offset < contents.length) {
+    const read = readSync(descriptor, contents, offset, contents.length - offset, offset);
+    if (read === 0) fail(CANDIDATE_CHANGED);
+    offset += read;
+  }
+  return contents;
+}
+
+function hasByteAtOffset(descriptor: number, offset: number): boolean {
+  return readSync(descriptor, Buffer.alloc(1), 0, 1, offset) !== 0;
+}
+
+function closeVerifiedDescriptor(
+  descriptor: number,
+  testHooks: RuntimeInspectionOptions["testHooks"],
+): void {
+  if (testHooks?.close) {
+    testHooks.close(descriptor);
+  } else {
+    closeSync(descriptor);
+  }
 }
 
 function verifiedCandidateBuffer(
@@ -251,10 +285,10 @@ function verifiedCandidateBuffer(
   limits: RuntimeInspectionLimits,
   testHooks: RuntimeInspectionOptions["testHooks"],
 ): Buffer {
-  let before: Stats;
+  let before: BigIntStats;
   let canonicalBefore: string;
   try {
-    before = lstatSync(candidate);
+    before = lstatSync(candidate, { bigint: true });
     if (!before.isFile() || before.isSymbolicLink()) fail(CANDIDATE_CHANGED);
     canonicalBefore = realpathSync(candidate);
     if (!isWithinRoot(canonicalRoot, canonicalBefore)) fail(CANDIDATE_CHANGED);
@@ -263,7 +297,7 @@ function verifiedCandidateBuffer(
     fail(CANDIDATE_CHANGED);
   }
 
-  if (!Number.isSafeInteger(before.size) || before.size > limits.maxMatchedRolloutBytes) {
+  if (before.size > BigInt(limits.maxMatchedRolloutBytes)) {
     fail(ROLLOUT_TOO_LARGE);
   }
 
@@ -272,10 +306,12 @@ function verifiedCandidateBuffer(
   let descriptor: number | undefined;
   try {
     descriptor = openSync(candidate, "r");
-    const opened = fstatSync(descriptor);
-    if (!opened.isFile() || !sameFileIdentity(before, opened)) fail(CANDIDATE_CHANGED);
+    const beforeRead = fstatSync(descriptor, { bigint: true });
+    if (!beforeRead.isFile() || !sameFileIdentity(before, beforeRead)) {
+      fail(CANDIDATE_CHANGED);
+    }
 
-    const afterPath = lstatSync(candidate);
+    const afterPath = lstatSync(candidate, { bigint: true });
     if (!afterPath.isFile() || afterPath.isSymbolicLink() || !sameFileIdentity(before, afterPath)) {
       fail(CANDIDATE_CHANGED);
     }
@@ -287,14 +323,34 @@ function verifiedCandidateBuffer(
       fail(CANDIDATE_CHANGED);
     }
 
-    const contents = Buffer.alloc(opened.size);
-    let offset = 0;
-    while (offset < contents.length) {
-      const read = readSync(descriptor, contents, offset, contents.length - offset, offset);
-      if (read === 0) fail(CANDIDATE_CHANGED);
-      offset += read;
+    const initialSize = Number(beforeRead.size);
+    /*
+     * A read-only process cannot make a same-user mutable file immutable. We
+     * detect changes observable across two handle reads and fstat snapshots;
+     * mutation after the final verification remains outside that capability.
+     */
+    const firstRead = readExact(descriptor, initialSize);
+    testHooks?.afterFirstRead?.(candidate);
+    if (hasByteAtOffset(descriptor, initialSize)) fail(CANDIDATE_CHANGED);
+    if (!sameFileIdentity(beforeRead, fstatSync(descriptor, { bigint: true }))) {
+      fail(CANDIDATE_CHANGED);
     }
-    return contents;
+
+    const secondRead = readExact(descriptor, initialSize);
+    if (!firstRead.equals(secondRead) || hasByteAtOffset(descriptor, initialSize)) {
+      fail(CANDIDATE_CHANGED);
+    }
+    if (!sameFileIdentity(beforeRead, fstatSync(descriptor, { bigint: true }))) {
+      fail(CANDIDATE_CHANGED);
+    }
+
+    try {
+      closeVerifiedDescriptor(descriptor, testHooks);
+      descriptor = undefined;
+    } catch {
+      fail(CLOSE_FAILED);
+    }
+    return firstRead;
   } catch (error) {
     if (error instanceof RuntimeInspectionError) throw error;
     fail(CANDIDATE_CHANGED);
@@ -302,9 +358,7 @@ function verifiedCandidateBuffer(
     if (descriptor !== undefined) {
       try {
         closeSync(descriptor);
-      } catch {
-        // The read result is never used after a close failure.
-      }
+      } catch {}
     }
   }
 }
