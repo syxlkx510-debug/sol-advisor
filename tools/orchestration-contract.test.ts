@@ -156,7 +156,7 @@ describe("Codex-only configured orchestration", () => {
   });
 
   test("publishes the configured-role prompt and TypeScript-only package commands", () => {
-    const agent = read("skills", "orchestration", "agents", "openai.yaml");
+    const agent = read("skills", "orchestration", "agents", "openai.yaml").replace(/\r\n/g, "\n");
     const pkg = JSON.parse(readFileSync(join(import.meta.dir, "..", "package.json"), "utf8"));
     expect(agent).toBe([
       "interface:",
