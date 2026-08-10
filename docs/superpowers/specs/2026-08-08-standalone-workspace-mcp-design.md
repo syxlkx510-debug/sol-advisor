@@ -1,5 +1,10 @@
 # Sol Advisor Standalone Workspace MCP Design
 
+> **Superseded:** The active Codex-only design is
+> [Codex-Only Sol Advisor Repair Design](2026-08-09-codex-only-sol-advisor-repair-design.md).
+> Cross-client, compatibility-role, and automatic visual Luna decisions in this
+> document must not be implemented.
+
 ## Problem
 
 Codex discovers Sol Advisor's packaged `.mcp.json`, but a fully restarted Windows session does not register its tools. The installed TypeScript entrypoint intermittently fails with `EPERM` when executed from the read-only plugin cache. The same server launched from the project workspace initializes successfully, lists all eight tools, and reports setup status `missing` when run with the existing private plugin data directory.

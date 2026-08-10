@@ -1,5 +1,10 @@
 # Native Luna Routine Role Design
 
+> **Partially Superseded:** The active Codex-only design is
+> [Codex-Only Sol Advisor Repair Design](2026-08-09-codex-only-sol-advisor-repair-design.md).
+> Keep only the historical reference to the explicit separation between the native routine role and the opt-in app-task lane.
+> Cross-client, compatibility-role, and automatic visual Luna decisions in this document must not be implemented.
+
 ## Objective
 
 Allow a user to explicitly select Luna as the model for Sol Advisor's native

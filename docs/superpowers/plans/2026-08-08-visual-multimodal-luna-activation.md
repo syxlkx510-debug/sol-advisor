@@ -1,5 +1,10 @@
 # Visual Multimodal Luna Activation Implementation Plan
 
+> **Superseded:** The active Codex-only design is
+> [Codex-Only Sol Advisor Repair Design](../specs/2026-08-09-codex-only-sol-advisor-repair-design.md).
+> Cross-client, compatibility-role, and automatic visual Luna decisions in this
+> document must not be implemented.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Persist an explicitly authorized `visual-required` Luna activation mode and update Sol Advisor so qualifying visual implementation requests create a user-visible GPT-5.6 Luna / Max app task without changing the three native roles or permitting fallback.

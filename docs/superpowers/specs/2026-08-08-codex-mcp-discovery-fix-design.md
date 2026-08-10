@@ -1,5 +1,10 @@
 # Sol Advisor Codex MCP Discovery Fix
 
+> **Superseded:** The active Codex-only design is
+> [Codex-Only Sol Advisor Repair Design](2026-08-09-codex-only-sol-advisor-repair-design.md).
+> Cross-client, compatibility-role, and automatic visual Luna decisions in this
+> document must not be implemented.
+
 ## Problem
 
 The installed Sol Advisor plugin exposes its skills, but Codex does not register the plugin's MCP setup tools after restart. The MCP server itself is healthy: its protocol, configuration, adapter lifecycle, and private-directory tests pass. The discovery failure occurs before the server starts because the Codex plugin manifest does not declare an MCP companion file.

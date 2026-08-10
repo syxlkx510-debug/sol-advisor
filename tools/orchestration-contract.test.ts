@@ -4,6 +4,51 @@ import { join } from "node:path";
 
 const plugin = join(import.meta.dir, "..", "plugins", "sol-advisor");
 const read = (...parts: string[]) => readFileSync(join(plugin, ...parts), "utf8");
+const activeDesign = "2026-08-09-codex-only-sol-advisor-repair-design.md";
+const activePlanDesign = `../specs/${activeDesign}`;
+
+const historicalGuidance = [
+  {
+    path: join("docs", "superpowers", "specs", "2026-08-08-codex-mcp-discovery-fix-design.md"),
+    link: activeDesign,
+    heading: "Superseded",
+  },
+  {
+    path: join("docs", "superpowers", "specs", "2026-08-08-standalone-workspace-mcp-design.md"),
+    link: activeDesign,
+    heading: "Superseded",
+  },
+  {
+    path: join("docs", "superpowers", "specs", "2026-08-08-visual-multimodal-luna-activation-design.md"),
+    link: activeDesign,
+    heading: "Superseded",
+  },
+  {
+    path: join("docs", "superpowers", "specs", "2026-08-09-native-luna-routine-role-design.md"),
+    link: activeDesign,
+    heading: "Partially Superseded",
+  },
+  {
+    path: join("docs", "superpowers", "plans", "2026-08-08-codex-mcp-discovery-fix.md"),
+    link: activePlanDesign,
+    heading: "Superseded",
+  },
+  {
+    path: join("docs", "superpowers", "plans", "2026-08-08-standalone-workspace-mcp.md"),
+    link: activePlanDesign,
+    heading: "Superseded",
+  },
+  {
+    path: join("docs", "superpowers", "plans", "2026-08-08-visual-multimodal-luna-activation.md"),
+    link: activePlanDesign,
+    heading: "Superseded",
+  },
+  {
+    path: join("docs", "superpowers", "plans", "2026-08-09-native-luna-routine-role.md"),
+    link: activePlanDesign,
+    heading: "Partially Superseded",
+  },
+] as const;
 
 describe("Codex-only configured orchestration", () => {
   test("contains only configured native role names", () => {
@@ -106,5 +151,42 @@ describe("Codex-only configured orchestration", () => {
     ].join("\n"));
     expect(pkg.scripts.ci).toBe("bun run test && bun run validate && bun run release:check");
     expect(pkg.scripts.test).toBe("bun test plugins/sol-advisor/mcp/server.test.ts plugins/sol-advisor/mcp/private-directory.test.ts tools/plugin-discovery.test.ts tools/orchestration-contract.test.ts tools/luna-explicit-contract.test.ts tools/version.test.ts");
+  });
+
+  test("README exposes only the Codex install and configured-role path", () => {
+    const readme = readFileSync(join(import.meta.dir, "..", "README.md"), "utf8");
+    expect(readme).toContain("codex plugin add sol-advisor@sol-advisor");
+    expect(readme).toContain("sol_advisor_routine");
+    expect(readme).toContain("sol_advisor_high");
+    expect(readme).toContain("sol_advisor_advisor");
+    expect(readme).toContain(".agents/plugins/marketplace.json");
+    expect(readme).toContain("restart Codex");
+    expect(readme).toContain("new task");
+    expect(readme).toContain("app-task lane");
+    expect(readme).toContain("behaviorally read-only");
+    expect(readme).toContain("workspace-write");
+    for (const removed of [
+      "Cursor", "VS Code", "GitHub Copilot", "Kiro",
+      "portable Agent Plugins", "sol_advisor_terra_implementer", "sol_advisor_sol_reviewer",
+      "automatic visual Luna", "visual-required", "install-agents.sh", "verify.sh",
+    ]) expect(readme).not.toContain(removed);
+  });
+
+  test("marks every historical design and plan with the active Codex-only banner", () => {
+    for (const document of historicalGuidance) {
+      const absolutePath = join(import.meta.dir, "..", document.path);
+      const content = readFileSync(absolutePath, "utf8").replace(/\r\n/g, "\n");
+      const lines = content.split("\n");
+      const titleIndex = lines.findIndex((line) => line.startsWith("# "));
+      expect(titleIndex).toBe(0);
+      const banner = lines.slice(titleIndex + 1, titleIndex + 8).join("\n");
+      expect(banner).toContain(`> **${document.heading}:**`);
+      expect(banner).toContain(`[Codex-Only Sol Advisor Repair Design](${document.link})`);
+      expect(banner).toContain("Cross-client, compatibility-role, and automatic visual Luna decisions");
+      expect(banner).toContain("must not be implemented");
+      if (document.heading === "Partially Superseded") {
+        expect(banner).toContain("explicit separation between the native routine role and the opt-in app-task lane");
+      }
+    }
   });
 });

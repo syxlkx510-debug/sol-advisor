@@ -1,5 +1,10 @@
 # Visual Multimodal Luna Activation Design
 
+> **Superseded:** The active Codex-only design is
+> [Codex-Only Sol Advisor Repair Design](2026-08-09-codex-only-sol-advisor-repair-design.md).
+> Cross-client, compatibility-role, and automatic visual Luna decisions in this
+> document must not be implemented.
+
 ## Objective
 
 Allow an explicitly configured Codex profile to create a user-visible GPT-5.6 Luna / Max app task automatically when visual material is necessary for implementation or acceptance, while preserving Sol Advisor's three existing native roles and fail-closed behavior.
