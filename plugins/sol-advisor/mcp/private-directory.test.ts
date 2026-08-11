@@ -26,6 +26,7 @@ function powershell(script: string, path: string) {
 function setWindowsAcl(path: string, includeEveryone: boolean) {
   powershell(`
     $path = $env:SOL_ADVISOR_TEST_PATH
+    $directory = [System.IO.DirectoryInfo]::new($path)
     $user = [System.Security.Principal.WindowsIdentity]::GetCurrent().User
     $acl = [System.Security.AccessControl.DirectorySecurity]::new()
     $acl.SetAccessRuleProtection($true, $false)
@@ -42,7 +43,7 @@ function setWindowsAcl(path: string, includeEveryone: boolean) {
         $everyone, 'ReadAndExecute', 'ContainerInherit,ObjectInherit', 'None', 'Allow')
       $acl.AddAccessRule($rule)
     }
-    Set-Acl -LiteralPath $path -AclObject $acl
+    $directory.SetAccessControl($acl)
   `, path);
 }
 

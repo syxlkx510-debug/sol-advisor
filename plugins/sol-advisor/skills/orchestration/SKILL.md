@@ -38,20 +38,59 @@ a strict risk trigger selects the strict protocol.
 
 ## Setup and configuration gate
 
-Before the first configured native lane in a parent task, call `get_setup_status` and
-`get_preferences`. If setup is `missing`, `schema-old`, or `corrupt`, run the `setup`
-interview in the parent chat and stop until it completes. Use the saved workspace from
-preferences to call `validate_configuration`. Require valid configuration and
-`adapterStatus: "current"`; otherwise stop without a role, model, or effort fallback.
+### Adaptive low and medium risk
 
-For adaptive low/medium work, retain this as a task-local validation snapshot in the
-parent task. Do not persist a new cache or change the MCP schema. Revalidate only when
-setup/preferences are changed, adapter state becomes stale or inconsistent, Codex is
-restarted into a new parent task, role exposure changes, runtime evidence conflicts,
-or the task escalates to strict.
+Before the first configured native lane in a parent task, call `get_setup_status`.
+When it reports `ready`, use the non-secret preferences returned with that ready state.
+If setup is `missing`, `schema-old`, or `corrupt`, run the `setup` interview in the
+parent chat and stop until it completes. Call `validate_configuration` once for the
+saved workspace and require valid configuration plus `adapterStatus: "current"`;
+otherwise stop without a role, model, or effort fallback.
 
-Strict work does not reuse the adaptive snapshot: it follows the complete per-spawn
-protocol below.
+Create a task-local validation snapshot containing all of the following observed
+values:
+
+- the complete returned preference object, including `profileKey`, `workspace`,
+  `updatedAt`, `pluginVersion`, and exact role model/effort values;
+- the three adapter paths returned by `validate_configuration`;
+- one adapter fingerprint from `inspect-adapter-snapshot.ts`.
+
+On Windows, set `$skillDir` to the directory containing this `SKILL.md`, resolve the
+snapshot inspector, and pass the exact three adapter paths returned by validation:
+
+```powershell
+$adapterSnapshotInspector = [IO.Path]::GetFullPath((Join-Path $skillDir '..\..\scripts\inspect-adapter-snapshot.ts'))
+bun $adapterSnapshotInspector $routineAdapterPath $highAdapterPath $advisorAdapterPath
+```
+
+Keep the returned lowercase SHA-256 fingerprint only in the current parent task. Do
+not persist a new cache or change the MCP schema.
+
+Before every later configured native spawn in adaptive work:
+
+1. Call `get_setup_status` once and require `ready`.
+2. Compare the newly returned complete preference object with the task-local snapshot.
+3. Run the adapter inspector against the same three paths with the saved fingerprint:
+
+   ```powershell
+   bun $adapterSnapshotInspector --expect $adapterFingerprint $routineAdapterPath $highAdapterPath $advisorAdapterPath
+   ```
+
+4. Reuse the snapshot only when the preferences are unchanged and the inspector exits
+   successfully with `matches_expected: true`.
+5. If either check differs or becomes unavailable, invalidate the snapshot, call
+   `validate_configuration`, and require `adapterStatus: "current"` before refreshing
+   the snapshot. The next spawn of each affected role must obtain fresh runtime
+   evidence. Stop rather than silently falling back when current state cannot be
+   established.
+
+A new parent task, Codex restart, setup change, adapter change, role-exposure change,
+runtime conflict, or escalation to strict invalidates the adaptive snapshot.
+
+### Strict risk
+
+Strict work does not reuse the adaptive snapshot. Before every configured native
+spawn, use the complete strict protocol below.
 
 ## Routing
 
@@ -63,7 +102,9 @@ protocol below.
 | Explicit current-request Luna authorization | Codex app-task lane |
 
 Select the native role from work complexity, not from a model family. A configured
-routine role may be backed by Luna when that exact model is saved. Model family does not select the execution lane and a saved Luna routine does not authorize the app-task lane.
+routine role may be backed by Luna when that exact model is saved.
+Model family does not select the execution lane, and a saved Luna routine does not
+authorize the app-task lane.
 
 ## Configured native spawn protocol
 
@@ -82,13 +123,12 @@ the spawn starts with independent context.
 
 For low and medium risk work:
 
-1. Establish the task-local setup/configuration snapshot once using the setup gate
+1. Establish and verify the task-local configuration snapshot using the adaptive gate
    above.
 2. Confirm the selected configured role name is exposed by the collaboration tool.
-3. On the first spawn of each configured role in the parent task, inspect public
-   runtime details. On Windows, set `$skillDir` to the directory containing this
-   `SKILL.md`, resolve the Bun inspector from it, and run it with the UUID returned
-   for the native child:
+3. On the first spawn of each configured role in the parent task after the snapshot is
+   created or refreshed, inspect public runtime details. On Windows, resolve the Bun
+   inspector from `$skillDir` and run it with the UUID returned for the native child:
 
    ```powershell
    $runtimeInspector = [IO.Path]::GetFullPath((Join-Path $skillDir '..\..\scripts\inspect-agent-runtime.ts'))
@@ -98,16 +138,17 @@ For low and medium risk work:
 4. Compare observed `agent_role`, `model`, and `effort` with the saved preferences.
    Public and local runtime values must agree whenever both are observable.
 5. Reuse the verified role/runtime snapshot for later spawns of the same configured
-   role in this parent task unless an invalidation condition from the setup gate is
-   observed.
+   role only while the lightweight configuration and adapter fingerprint checks keep
+   succeeding.
 6. For `sol_advisor_advisor`, when it is used, capture the observed sandbox policy and
-   permission profile on its first spawn. `read-only` is enforced only when the host
-   reports it. If it reports `workspace-write` with a managed permission profile,
-   describe the review as behaviorally read-only only after checking before-and-after
-   repository and artifact state; do not describe it as host-enforced read-only.
-7. If role exposure, configuration state, or runtime evidence becomes unavailable or
-   inconsistent, invalidate the task-local snapshot and stop the affected lane rather
-   than silently falling back.
+   permission profile on its first spawn after snapshot creation or refresh.
+   `read-only` is enforced only when the host reports it. If it reports
+   `workspace-write` with a managed permission profile, describe the review as
+   behaviorally read-only only after checking before-and-after repository and artifact
+   state; do not describe it as host-enforced read-only.
+7. If role exposure, configuration state, adapter fingerprint, or runtime evidence
+   becomes unavailable or inconsistent, invalidate the snapshot and stop the affected
+   lane rather than silently falling back.
 
 ### Strict protocol
 
@@ -165,6 +206,28 @@ Verification and review follow the risk tier:
 For any correction, use `sol_advisor_routine` or `sol_advisor_high` again according to
 the corrected work's complexity. Do not silently repair a child result in the parent
 or substitute a different role.
+
+## Orchestration summary
+
+Before the final user-facing completion message, report a compact summary using only
+observed counts. Do not estimate unavailable data and do not claim token savings from
+request counts alone.
+
+```text
+ORCHESTRATION SUMMARY
+Risk tier: low | medium | strict
+Configured role spawns: routine=<n>, high=<n>, advisor=<n>
+Luna app tasks: <n>
+Configuration checks: full=<n>, lightweight=<n>, snapshot_reuses=<n>
+Runtime inspections: <n>
+Parent verification: targeted=<n>, broader=<n>
+Corrections: <n>
+Escalations: <none or concise reason>
+```
+
+A lightweight check means one ready `get_setup_status` comparison plus one successful
+adapter fingerprint comparison. A snapshot reuse counts only when both checks pass.
+Keep this summary separate from correctness claims and verification evidence.
 
 ## Explicit Luna app-task lane
 
