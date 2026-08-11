@@ -114,7 +114,8 @@ Start the workflow in the parent chat with:
 
 ```text
 Use $sol-advisor:orchestration for this request. Keep architecture and acceptance in
-the parent task, use the saved configured role, and obtain a fresh advisor review.
+the parent task, use the saved configured role, and apply the adaptive risk policy;
+use strict review only when the task or evidence requires it.
 ```
 
 ## Lazy setup and exact-token installation
@@ -166,6 +167,39 @@ correction decisions, and acceptance.
 
 The advisor file requests `sandbox_mode = "read-only"`; the actual guarantee is
 reported from runtime evidence, as described below.
+
+## Adaptive verification policy
+
+Adaptive orchestration is the default. The worker role is chosen from implementation
+complexity, while verification intensity is chosen from risk.
+
+- **Low risk** covers bounded, reversible, project-local edits such as UI/CSS, copy,
+  tests, small components, and fully specified mechanical refactors. The worker runs
+  targeted verification and the parent inspects the actual diff and evidence. A full
+  parent rerun and advisor review are not required by default.
+- **Medium risk** covers multi-file features, local APIs, data-shape changes,
+  agent/workflow logic, algorithmic work, and reversible debugging. Workers run
+  targeted verification; the parent inspects every diff, runs broader verification at
+  a coherent milestone, and obtains one fresh advisor review of the accumulated change
+  set before acceptance.
+- **Strict** preserves the original 0.6.0 fail-closed path for authentication,
+  authorization, secrets, permissions, destructive or bulk filesystem operations,
+  database migrations, deployment/release/installers, dependency or supply-chain
+  security, MCP/plugin discovery, role adapters/routing, Sol Advisor configuration,
+  explicit user requests for strict review, and similar irreversible or high-blast-
+  radius work. Strict mode revalidates configuration and runtime evidence before every
+  native spawn, reruns parent verification after every worker report, and requires a
+  fresh advisor verdict after each correction.
+
+For low and medium work, setup/configuration is validated once per parent task and the
+first runtime inspection of each configured role can be reused inside that same task.
+The snapshot is not persisted and is invalidated by configuration or adapter changes,
+role-exposure changes, conflicting runtime evidence, a new parent task, or escalation
+to strict. There is no fallback to a different role, model, or effort.
+
+The parent still inspects the actual diff after every worker report in every tier.
+Reducing repeated environment proof does not mean trusting a worker's completion claim
+without inspecting what changed.
 
 ## Explicit Luna app-task lane
 
