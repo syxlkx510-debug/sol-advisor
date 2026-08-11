@@ -12,17 +12,33 @@ verification, and independent review are repeated.
 
 ### Adaptive low and medium risk
 
-Before the first configured native delegation in the parent task, establish the
-ready setup and saved-preference snapshot, validate the saved workspace, and require
-`adapterStatus=current`. Spawn the exact configured role with `fork_turns: "none"`.
-Do not pass `model`, `reasoning_effort`, or effort overrides.
+Before the first configured native delegation in the parent task:
 
-On the first spawn of each configured role in the parent task, compare observed role,
-model, and effort with the saved preferences using the runtime evidence protocol in
-`SKILL.md`. Reuse that verified role/runtime snapshot for later spawns of the same role
-in the same parent task unless configuration, adapter, role exposure, or runtime
-evidence changes or becomes inconsistent. For an advisor spawn, also capture the
-observed sandbox policy and permission profile.
+1. Call `get_setup_status`, require `ready`, and retain the complete non-secret
+   preference object returned with that ready state.
+2. Call `validate_configuration` for the saved workspace and require
+   `adapterStatus=current`.
+3. Record the three returned adapter paths and run
+   `inspect-adapter-snapshot.ts` to obtain the task-local adapter fingerprint.
+4. Spawn the exact configured role with `fork_turns: "none"`. Do not pass `model`,
+   `reasoning_effort`, or effort overrides.
+5. On the first spawn of each configured role after snapshot creation, compare
+   observed role, model, and effort with the saved preferences using the runtime
+   evidence protocol in `SKILL.md`. For an advisor spawn, also capture the observed
+   sandbox policy and permission profile.
+
+Before every later adaptive native spawn, call `get_setup_status` once, compare the
+complete returned preferences with the task-local copy, and run the adapter snapshot
+inspector with `--expect` and the saved fingerprint. Reuse verified role/runtime
+evidence only when both lightweight checks succeed. A successful reuse therefore has
+concrete current evidence; it is not based only on the parent remembering an earlier
+result.
+
+If preferences differ, the adapter fingerprint differs, a file is missing or unsafe,
+or either check is unavailable, invalidate the snapshot. Run
+`validate_configuration`, require `adapterStatus=current`, refresh the fingerprint,
+and obtain fresh runtime evidence for affected roles. Stop without fallback when the
+current state cannot be established.
 
 A reused task-local snapshot is orchestration state only. Do not persist it, write a
 new configuration file, weaken the saved fail-closed policy, or use it across a new
@@ -120,13 +136,13 @@ Any code change after an advisor verdict invalidates that verdict for final acce
 
 ### Strict risk
 
-Preserve the 0.6.0 fail-closed behavior. The parent reruns the specified verification after every worker report.
-After parent verification, spawn a fresh `sol_advisor_advisor` with
-`fork_turns: "none"` and fresh strict runtime evidence. If the verdict is `fix-first`,
-delegate a corrected bounded packet to the configured worker selected by complexity,
-rerun parent verification, and obtain a new fresh advisor review. If the verdict is
-`rethink`, revise the architecture before continuing. A reviewer verdict is invalid
-after any code change.
+Preserve the 0.6.0 fail-closed behavior. The parent reruns the specified verification
+after every worker report. After parent verification, spawn a fresh
+`sol_advisor_advisor` with `fork_turns: "none"` and fresh strict runtime evidence. If
+the verdict is `fix-first`, delegate a corrected bounded packet to the configured
+worker selected by complexity, rerun parent verification, and obtain a new fresh
+advisor review. If the verdict is `rethink`, revise the architecture before continuing.
+A reviewer verdict is invalid after any code change.
 
 ## Configured reviewer packet
 
@@ -166,3 +182,11 @@ sandbox, report enforced isolation. With broader host access, proceed only when 
 isolation is not required, the reviewer is instructed not to edit, and the parent
 captures before-and-after repository and artifact state. Report the actual sandbox
 policy and permission profile; do not upgrade behavioral non-mutation to enforcement.
+
+## Observability contract
+
+Track observed orchestration counts while the task runs. The final summary must report
+the selected risk tier, configured role spawns, Luna app tasks, full and lightweight
+configuration checks, successful snapshot reuses, runtime inspections, parent
+verification runs, corrections, and escalations. Do not estimate missing counts or
+present request counts as token measurements.
