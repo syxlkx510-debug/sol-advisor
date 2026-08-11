@@ -19,8 +19,9 @@ const WINDOWS_ADMINISTRATORS_SID = "S-1-5-32-544";
 
 function readWindowsAcl(path: string): WindowsAcl {
   const script = `
-    $acl = Get-Acl -LiteralPath $env:SOL_ADVISOR_ACL_PATH
-    $owner = ([System.Security.Principal.NTAccount]::new($acl.Owner)).Translate([System.Security.Principal.SecurityIdentifier]).Value
+    $directory = [System.IO.DirectoryInfo]::new($env:SOL_ADVISOR_ACL_PATH)
+    $acl = $directory.GetAccessControl([System.Security.AccessControl.AccessControlSections]::All)
+    $owner = $acl.GetOwner([System.Security.Principal.SecurityIdentifier]).Value
     $current = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
     $rules = @($acl.GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier]) | ForEach-Object {
       [pscustomobject]@{
