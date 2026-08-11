@@ -102,9 +102,9 @@ spawn, use the complete strict protocol below.
 | Explicit current-request Luna authorization | Codex app-task lane |
 
 Select the native role from work complexity, not from a model family. A configured
-routine role may be backed by Luna when that exact model is saved. Model family does
-not select the execution lane and a saved Luna routine does not authorize the app-task
-lane.
+routine role may be backed by Luna when that exact model is saved.
+Model family does not select the execution lane, and a saved Luna routine does not
+authorize the app-task lane.
 
 ## Configured native spawn protocol
 
