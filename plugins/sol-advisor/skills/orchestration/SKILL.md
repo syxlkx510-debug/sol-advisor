@@ -47,7 +47,7 @@ parent chat and stop until it completes. Call `validate_configuration` once for 
 saved workspace and require valid configuration plus `adapterStatus: "current"`;
 otherwise stop without a role, model, or effort fallback.
 
-Create a task-local configuration snapshot containing all of the following observed
+Create a task-local validation snapshot containing all of the following observed
 values:
 
 - the complete returned preference object, including `profileKey`, `workspace`,
@@ -126,9 +126,9 @@ For low and medium risk work:
 1. Establish and verify the task-local configuration snapshot using the adaptive gate
    above.
 2. Confirm the selected configured role name is exposed by the collaboration tool.
-3. On the first spawn of each configured role after the snapshot is created or
-   refreshed, inspect public runtime details. On Windows, resolve the Bun inspector
-   from `$skillDir` and run it with the UUID returned for the native child:
+3. On the first spawn of each configured role in the parent task after the snapshot is
+   created or refreshed, inspect public runtime details. On Windows, resolve the Bun
+   inspector from `$skillDir` and run it with the UUID returned for the native child:
 
    ```powershell
    $runtimeInspector = [IO.Path]::GetFullPath((Join-Path $skillDir '..\..\scripts\inspect-agent-runtime.ts'))
@@ -137,7 +137,7 @@ For low and medium risk work:
 
 4. Compare observed `agent_role`, `model`, and `effort` with the saved preferences.
    Public and local runtime values must agree whenever both are observable.
-5. Reuse the verified role/runtime evidence for later spawns of the same configured
+5. Reuse the verified role/runtime snapshot for later spawns of the same configured
    role only while the lightweight configuration and adapter fingerprint checks keep
    succeeding.
 6. For `sol_advisor_advisor`, when it is used, capture the observed sandbox policy and
