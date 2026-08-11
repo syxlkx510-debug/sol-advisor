@@ -31,10 +31,10 @@ Use these tiers:
   irreversible/high-blast-radius behavior.
 
 When the tier is genuinely unclear, choose medium rather than strict. Escalate to
-strict when concrete evidence reveals a strict trigger. The stock invocation wording
-about obtaining a fresh advisor review does not itself opt a low-risk task into strict;
-review requirements follow this risk policy unless the user separately requests a
-strict review.
+strict when concrete evidence reveals a strict trigger. A direct request for an
+advisor review adds the requested review at the selected low or medium tier but does
+not by itself force strict per-spawn validation. Only a direct strict-review request or
+a strict risk trigger selects the strict protocol.
 
 ## Setup and configuration gate
 
