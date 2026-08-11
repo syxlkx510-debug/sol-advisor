@@ -30,9 +30,9 @@ Before the first configured native delegation in the parent task:
 Before every later adaptive native spawn, call `get_setup_status` once, compare the
 complete returned preferences with the task-local copy, and run the adapter snapshot
 inspector with `--expect` and the saved fingerprint. Reuse verified role/runtime
-evidence only when both lightweight checks succeed. A successful reuse therefore has
-concrete current evidence; it is not based only on the parent remembering an earlier
-result.
+evidence only when both lightweight checks succeed.
+A successful reuse therefore has concrete current evidence; it is not based only on
+the parent remembering an earlier result.
 
 If preferences differ, the adapter fingerprint differs, a file is missing or unsafe,
 or either check is unavailable, invalidate the snapshot. Run
@@ -136,13 +136,13 @@ Any code change after an advisor verdict invalidates that verdict for final acce
 
 ### Strict risk
 
-Preserve the 0.6.0 fail-closed behavior. The parent reruns the specified verification
-after every worker report. After parent verification, spawn a fresh
-`sol_advisor_advisor` with `fork_turns: "none"` and fresh strict runtime evidence. If
-the verdict is `fix-first`, delegate a corrected bounded packet to the configured
-worker selected by complexity, rerun parent verification, and obtain a new fresh
-advisor review. If the verdict is `rethink`, revise the architecture before continuing.
-A reviewer verdict is invalid after any code change.
+Preserve the 0.6.0 fail-closed behavior.
+The parent reruns the specified verification after every worker report. After parent
+verification, spawn a fresh `sol_advisor_advisor` with `fork_turns: "none"` and fresh
+strict runtime evidence. If the verdict is `fix-first`, delegate a corrected bounded
+packet to the configured worker selected by complexity, rerun parent verification,
+and obtain a new fresh advisor review. If the verdict is `rethink`, revise the
+architecture before continuing. A reviewer verdict is invalid after any code change.
 
 ## Configured reviewer packet
 
