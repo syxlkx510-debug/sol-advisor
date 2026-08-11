@@ -95,8 +95,15 @@ describe("Codex-only configured orchestration", () => {
     expect(existsSync(join(plugin, "skills", "orchestration", "references", "portable-entry.md"))).toBe(false);
   });
 
-  test("uses configuration validation and Bun runtime evidence", () => {
+  test("uses adaptive task snapshots while preserving strict per-spawn evidence", () => {
     const skill = read("skills", "orchestration", "SKILL.md");
+    const contracts = read("skills", "orchestration", "references", "role-contracts.md");
+    expect(skill).toContain("Adaptive orchestration is the default");
+    expect(skill).toContain("Before the first configured native lane in a parent task");
+    expect(skill).toContain("task-local validation snapshot");
+    expect(skill).toContain("On the first spawn of each configured role in the parent task");
+    expect(skill).toContain("Reuse the verified role/runtime snapshot");
+    expect(skill).toContain("Before every configured native spawn in strict work");
     expect(skill).toContain("validate_configuration");
     expect(skill).toContain("adapterStatus");
     expect(skill).toContain("inspect-agent-runtime.ts");
@@ -106,6 +113,8 @@ describe("Codex-only configured orchestration", () => {
     expect(skill).toContain("behaviorally read-only");
     expect(skill).toContain("Do not pass `model`, `reasoning_effort`, or effort overrides.");
     expect(skill).toContain("saved preferences");
+    expect(contracts).toContain("A reused task-local snapshot is orchestration state only");
+    expect(contracts).toContain("Before every native spawn, follow the strict configured native spawn protocol");
   });
 
   test("uses the exact eleven-step Codex setup sequence", () => {
@@ -116,8 +125,17 @@ describe("Codex-only configured orchestration", () => {
     ]);
   });
 
-  test("requires a configured reviewer verdict and observed isolation evidence", () => {
+  test("uses risk-tier verification and preserves a configured reviewer contract", () => {
+    const skill = read("skills", "orchestration", "SKILL.md");
     const contracts = read("skills", "orchestration", "references", "role-contracts.md");
+    for (const tier of ["Low risk", "Medium risk", "Strict"]) {
+      expect(skill).toContain(tier);
+    }
+    expect(contracts).toContain("The parent always inspects the actual diff");
+    expect(contracts).toContain("does not require a final advisor by default");
+    expect(contracts).toContain("obtain one fresh `sol_advisor_advisor` review");
+    expect(contracts).toContain("Preserve the 0.6.0 fail-closed behavior");
+    expect(contracts).toContain("reruns the specified verification after every worker report");
     for (const section of ["OBJECTIVE", "FILES AND OWNERSHIP", "INTERFACES", "CONSTRAINTS", "VERIFICATION", "RETURN"]) {
       expect(contracts).toContain(section);
     }
