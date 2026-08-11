@@ -1,4 +1,4 @@
 interface:
   display_name: "Sol Advisor Orchestration"
-  short_description: "Use configured Codex roles or explicitly authorize a Luna task"
-  default_prompt: "Use $orchestration with the saved routine, high, and advisor roles; use the Luna app-task lane only when I explicitly authorize it."
+  short_description: "Use adaptive Codex roles or explicitly authorize a Luna task"
+  default_prompt: "Use $orchestration with the saved routine, high, and advisor roles; apply the adaptive risk policy, include the orchestration summary, and use the Luna app-task lane only when I explicitly authorize it."
