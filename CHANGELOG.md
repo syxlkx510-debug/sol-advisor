@@ -16,6 +16,7 @@ All notable changes to Sol Advisor are documented here. This project follows
 - Each configured native role now requires an exact non-empty model and `model_reasoning_effort` identifier before it can be saved or rendered.
 - The parent orchestrator continues to inherit the parent chat selection; its optional recommendation effort is not a configured native role requirement.
 - Low-risk work keeps worker-targeted verification plus parent diff inspection without a mandatory final advisor; medium-risk work batches broader verification and one accumulated-change advisor review; strict work preserves per-worker parent verification and fresh review after corrections.
+- CI cleanup now removes symlink fixtures portably across Windows and Linux runners.
 
 ## [0.5.0] - 2026-08-07
 
