@@ -5,22 +5,48 @@ parent model or global defaults. Read the [Luna task-lane contract](luna-task-la
 only after the user's current request explicitly authorizes that separate app-task
 lane.
 
-## Required configured-role evidence
+## Risk-tier evidence contract
 
-Before every native spawn, follow the configured native spawn protocol in `SKILL.md`:
-require ready setup, saved preferences, `adapterStatus=current`, exact role exposure,
-and runtime evidence. Spawn the exact configured role with `fork_turns: "none"`.
-Do not pass `model`, `reasoning_effort`, or effort overrides. `fork_turns: "none"` is
-required so the configured role file controls its saved model and effort, and a fresh
-independent review cannot inherit history. Compare the observed role, model, and
-effort with saved preferences, and stop on absent or inconsistent evidence. For the
-reviewer, also capture the observed sandbox policy and permission profile.
+Use the risk tier selected by `SKILL.md` to decide how often setup, runtime, parent
+verification, and independent review are repeated.
+
+### Adaptive low and medium risk
+
+Before the first configured native delegation in the parent task, establish the
+ready setup and saved-preference snapshot, validate the saved workspace, and require
+`adapterStatus=current`. Spawn the exact configured role with `fork_turns: "none"`.
+Do not pass `model`, `reasoning_effort`, or effort overrides.
+
+On the first spawn of each configured role in the parent task, compare observed role,
+model, and effort with the saved preferences using the runtime evidence protocol in
+`SKILL.md`. Reuse that verified role/runtime snapshot for later spawns of the same role
+in the same parent task unless configuration, adapter, role exposure, or runtime
+evidence changes or becomes inconsistent. For an advisor spawn, also capture the
+observed sandbox policy and permission profile.
+
+A reused task-local snapshot is orchestration state only. Do not persist it, write a
+new configuration file, weaken the saved fail-closed policy, or use it across a new
+parent task.
+
+### Strict risk
+
+Before every native spawn, follow the strict configured native spawn protocol in
+`SKILL.md`: require ready setup, saved preferences, `adapterStatus=current`, exact role
+exposure, and fresh runtime evidence. Spawn the exact configured role with
+`fork_turns: "none"`. Do not pass `model`, `reasoning_effort`, or effort overrides.
+Compare the observed role, model, and effort with saved preferences, and stop on absent
+or inconsistent evidence. For the reviewer, also capture the observed sandbox policy
+and permission profile.
 
 ## Worker selections
 
 - Use `sol_advisor_routine` for bounded, mechanical, or fully specified work.
 - Use `sol_advisor_high` for complex, security-sensitive, algorithmic, debugging, or
   broad work.
+
+Worker selection is based on implementation complexity. Verification intensity is
+based on risk tier, so a `sol_advisor_high` implementation may still use medium-risk
+verification when the change is reversible and project-local.
 
 Both worker selections receive this complete packet. Replace every placeholder and do
 not omit a section. Spawn `sol_advisor_routine` or `sol_advisor_high` with
@@ -46,7 +72,7 @@ CONSTRAINTS
 - <Repository conventions, safety boundaries, excluded scope, and settled decisions.>
 
 VERIFICATION
-- Run: <exact command>
+- Run: <exact targeted command appropriate to this worker's change>
   Success: <concrete expected result>
 - Inspect: <exact file, diff, or generated artifact>
   Success: <concrete expected evidence>
@@ -64,16 +90,52 @@ JUDGMENT CALLS: <decisions the specification left open, or none>
 GAPS: <unfinished work, ambiguity, or none>
 ```
 
-The parent inspects the actual diff and reruns verification after every worker report.
+The parent always inspects the actual diff and changed-file scope after every worker
+report. Treat the worker's verification report as evidence, not as permission to skip
+inspection.
 
-## Final configured reviewer
+## Verification by risk tier
 
-After parent verification, spawn a fresh `sol_advisor_advisor` with
-`fork_turns: "none"` using the same runtime evidence protocol. Do not pass `model`,
-`reasoning_effort`, or effort overrides. The reviewer must remain behaviorally
-read-only, inspect the actual files and accumulated change set, never implement fixes,
-and must not rely on inherited history: the complete reviewer packet below is its only
-context and produces a fresh independent review.
+### Low risk
+
+The worker runs the packet's targeted verification. The parent inspects the actual
+diff, ownership boundaries, and returned evidence. The parent does not rerun the full
+verification suite and does not require a final advisor by default.
+
+Escalate to medium or strict before acceptance when the diff exceeds the bounded
+packet, verification is missing or contradictory, the worker changed an interface the
+packet said to preserve, or new risk becomes visible.
+
+### Medium risk
+
+Each worker runs targeted verification for its own change. The parent inspects every
+actual diff and accumulates the change set. Normally run broader parent verification
+once when the implementation reaches a coherent milestone or is ready for final
+review, rather than after every worker iteration.
+
+After that broader parent verification, obtain one fresh `sol_advisor_advisor` review
+of the accumulated change set before acceptance. If several worker corrections can be
+batched safely, make those corrections before requesting the next final advisor pass.
+Any code change after an advisor verdict invalidates that verdict for final acceptance.
+
+### Strict risk
+
+Preserve the 0.6.0 fail-closed behavior. The parent reruns the specified verification
+after every worker report. After parent verification, spawn a fresh
+`sol_advisor_advisor` with `fork_turns: "none"` and fresh strict runtime evidence. If
+the verdict is `fix-first`, delegate a corrected bounded packet to the configured
+worker selected by complexity, rerun parent verification, and obtain a new fresh
+advisor review. If the verdict is `rethink`, revise the architecture before continuing.
+A reviewer verdict is invalid after any code change.
+
+## Configured reviewer packet
+
+Whenever medium or strict policy requires an advisor review, spawn
+`sol_advisor_advisor` with `fork_turns: "none"` using the applicable runtime evidence
+protocol. Do not pass `model`, `reasoning_effort`, or effort overrides. The reviewer
+must remain behaviorally read-only, inspect the actual files and accumulated change
+set, never implement fixes, and must not rely on inherited history: the complete
+reviewer packet below is its only context and produces a fresh independent review.
 
 ```text
 STATED GOAL
@@ -98,11 +160,6 @@ REASON: <decisive evidence-based reason>
 FINDINGS: <precise file references and required fixes, or none>
 RESIDUAL RISK: <most important remaining risk, or none>
 ```
-
-If the verdict is `fix-first`, the parent delegates a corrected, bounded packet to the
-configured worker selected by complexity, reruns verification, and obtains a new fresh
-review. If it is `rethink`, revise the architecture before continuing. A reviewer
-verdict is invalid after a change.
 
 Use observed isolation rather than requested isolation. With an observed `read-only`
 sandbox, report enforced isolation. With broader host access, proceed only when hard
