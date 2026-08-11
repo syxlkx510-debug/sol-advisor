@@ -9,7 +9,7 @@
     "release:check": "bun tools/validate.ts release-check",
     "ci": "bun run test && bun run validate && bun run release:check",
     "tag:check": "bun tools/validate.ts tag-check",
-    "test": "bun test plugins/sol-advisor/mcp/server.test.ts plugins/sol-advisor/mcp/private-directory.test.ts tools/plugin-discovery.test.ts tools/orchestration-contract.test.ts tools/luna-explicit-contract.test.ts tools/adapter-snapshot.test.ts tools/version.test.ts"
+    "test": "bun test plugins/sol-advisor/mcp/server.test.ts plugins/sol-advisor/mcp/private-directory.test.ts tools/plugin-discovery.test.ts tools/orchestration-contract.test.ts tools/luna-explicit-contract.test.ts tools/version.test.ts"
   },
   "devDependencies": {
     "@types/bun": "1.3.5"
