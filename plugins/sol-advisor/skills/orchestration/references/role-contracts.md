@@ -120,8 +120,7 @@ Any code change after an advisor verdict invalidates that verdict for final acce
 
 ### Strict risk
 
-Preserve the 0.6.0 fail-closed behavior. The parent reruns the specified verification
-after every worker report. After parent verification, spawn a fresh
+Preserve the 0.6.0 fail-closed behavior. The parent reruns the specified verification after every worker report. After parent verification, spawn a fresh
 `sol_advisor_advisor` with `fork_turns: "none"` and fresh strict runtime evidence. If
 the verdict is `fix-first`, delegate a corrected bounded packet to the configured
 worker selected by complexity, rerun parent verification, and obtain a new fresh
